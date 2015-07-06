@@ -77,18 +77,13 @@ object TsneHelpers {
   }
 
   def jointDistribution(input: DataSet[(Long, Long, Double)]): DataSet[(Long, Long, Double)] = {
+    
+    
     val inputTransposed =
       input.map(x => (x._2, x._1, x._3))
 
     val jointDistribution =
       input.union(inputTransposed).groupBy(0, 1).reduce((x, y) => (x._1, x._2, x._3 + y._3))
-
-    /*val jointDistribution =
-      input
-        // join p_i|j and p_j|i to symmetrize the distribution
-        .join(input).where(0, 1).equalTo(1, 0) {
-        (i, j) => (i._1, i._2, i._3 + j._3)
-      }*/
 
     // collect the sum over the joint distribution for normalization
     val sumP = jointDistribution.sum(2)

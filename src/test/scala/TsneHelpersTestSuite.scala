@@ -84,6 +84,23 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
   }
 
   //TODO: add testcase for jointProbabilities with sparse input
+  "jointProbabilities" should "return the sparse symmetrized probability distribution p_ij over the datapoints" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val pairwiseAffinities = env.fromCollection(TsneHelpersTestSuite.pairwiseAffinitiesResultsSparse)
+    val results = jointDistribution(pairwiseAffinities).collect()
+    val expectedResults = TsneHelpersTestSuite.jointProbabilitiesResultsSparse
+    
+    results.size should equal (expectedResults.size)
+    for (expected <- expectedResults) {
+      val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
+      result match {
+        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case _ => fail("expected result not found")
+      }
+    }
+    results.map(_._3).sum should equal (1.0 +- 1e-12)
+  }
 }
 
 object TsneHelpersTestSuite {
@@ -159,4 +176,26 @@ object TsneHelpersTestSuite {
     (8L, 2L, 5.49546565295e-08), (8L, 3L, 3.84568831437e-06), (8L, 4L, 0.000124306732818),
     (8L, 5L, 0.00185594971752), (8L, 6L, 0.0127993744429), (8L, 7L, 0.0685498014338)
   ).toSeq
+
+  //calculated by c++ program
+  val pairwiseAffinitiesResultsSparse: Seq[(Long, Long, Double)] = List(
+    (0L, 5L, 0.999490),(0L, 4L, 0.000000),(1L, 5L, 0.999490),(1L, 6L, 0.000000),
+    (2L, 3L, 0.999490),(2L, 4L, 0.000000),(3L, 4L, 0.499252),(3L, 2L, 0.499252),
+    (4L, 3L, 0.499252),(4L, 5L, 0.499252),(5L, 6L, 0.499252),(5L, 4L, 0.499252),
+    (6L, 5L, 0.499252),(6L, 7L, 0.499252),(7L, 9L, 0.999490),(7L, 6L, 0.000000),
+    (8L, 9L, 0.999490),(8L, 7L, 0.000000),(9L, 8L, 0.999490),(9L, 7L, 0.000000),
+    (10L, 11L, 0.999490),(10L, 8L, 0.000000),(11L, 10L, 0.999490),(11L, 8L, 0.000000)
+  ).toSeq
+
+  //calculated by c++ program
+  val jointProbabilitiesResultsSparse: Seq[(Long, Long, Double)] = List(
+    (0L, 5L, 0.041680),(0L, 4L, 0.000000),(1L, 5L, 0.041680),(1L, 6L, 0.000000),
+    (2L, 3L, 0.062500),(2L, 4L, 0.000000),(3L, 2L, 0.062500),(3L, 4L, 0.041639),
+    (4L, 0L, 0.000000),(4L, 2L, 0.000000),(4L, 3L, 0.041639),(4L, 5L, 0.041639),
+    (5L, 0L, 0.041680),(5L, 1L, 0.041680),(5L, 4L, 0.041639),(5L, 6L, 0.041639),
+    (6L, 1L, 0.000000),(6L, 5L, 0.041639),(6L, 7L, 0.020820),(7L, 6L, 0.020820),
+    (7L, 9L, 0.041680),(7L, 8L, 0.000000),(8L, 9L, 0.083361),(8L, 7L, 0.000000),
+    (8L, 10L, 0.000000),(8L, 11L, 0.000000),(9L, 7L, 0.041680),(9L, 8L, 0.083361),
+    (10L, 11L, 0.083361),(10L, 8L, 0.000000),(11L, 10L, 0.083361),(11L, 8L, 0.000000)
+  )
 }
