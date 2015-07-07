@@ -109,6 +109,44 @@ object TsneHelpers {
       }
     })
   }
+  
+  def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric) = {
+    val distances = points
+        .cross(points) {
+      (e1, e2) =>
+        //   i         j      /----------------- d ---------------\ /---------- difference vector----------\
+        (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), e1.vector.asBreeze - e2.vector.asBreeze)
+    }// remove distances == 0
+        .filter(_._3 != 0) //TODO: check whether this is really right for dense matrices??
+    
+    distances
+  }
+
+  // Compute Q-matrix and normalization sum
+  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]): {val q : DataSet[(Long, Long, Double)];val sumQ : DataSet[(Long, Long, Double, Int)]}= {
+    // unnormalized q_ij
+    val unnormAffinities = distances
+        .map { d =>
+      // i     j   1 / (1 + dij)
+      (d._1, d._2, 1 / (1 + d._3), 1)
+    }
+
+    // sum over q_i
+    val sumAffinities = unnormAffinities
+        .groupBy(_._1)
+        //                     i       j     sum(q_i)
+        .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
+
+    // make affinities a probability distribution by q_ij / sum(qi)
+    val lowDimAffinities = unnormAffinities.join(sumAffinities).where(0).equalTo(0) {
+      (aff, sum) => (aff._1, aff._2, max(aff._3 / sum._3, Double.MinValue))
+    }
+
+    new {
+      val q = lowDimAffinities
+      val sumQ = sumAffinities
+    }
+  }
 
   def optimize(input: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
                learningRate: Double, iterations: Int, metric: DistanceMetric):
@@ -118,33 +156,13 @@ object TsneHelpers {
       currentEmbedding =>
 
         // compute pairwise differences yi - yj
-        val distances = currentEmbedding
-          .cross(currentEmbedding) {
-          (e1, e2) =>
-            //   i         j      /----------------- d ---------------\ /---------- difference vector----------\
-            (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), e1.vector.asBreeze - e2.vector.asBreeze)
-        }// remove distances == 0
-          .filter(_._3 != 0)
+        val distances = computeDistances(currentEmbedding, metric)
 
-        // unnormalized q_ij
-        val unnormAffinities = distances
-          .map { d =>
-          // i     j   1 / (1 + dij)
-          (d._1, d._2, 1 / (1 + d._3), 1)
-        }
-
-        // sum over q_i
-        val sumAffinities = unnormAffinities
-          .groupBy(_._1)
-          //                     i       j     sum(q_i)
-          .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
-
-        // make affinities a probability distribution by q_ij / sum(qi)
-        val lowDimAffinities = unnormAffinities.join(sumAffinities).where(0).equalTo(0) {
-          (aff, sum) => (aff._1, aff._2, max(aff._3 / sum._3, Double.MinValue))
-        }
-
-        // TODO: compute gradient dC / dy_i with Flink SGD
+        // Compute Q-matrix and normalization sum
+        val results = computeLowDimAffinities(distances)
+        
+        val lowDimAffinities = results.q
+        val sumAffinities = results.sumQ
 
         // this is not the optimized version
         val gradient = input
