@@ -20,6 +20,7 @@ package de.tu_berlin.dima.impro3
 
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
+import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.SparseVector
 import org.apache.flink.ml.metrics.distances._
@@ -40,21 +41,20 @@ object Tsne {
 
     val metric = SquaredEuclideanDistanceMetric()
     val perplexity = parameters.getDouble("perplexity", 30.0)
-    val nComponents = parameters.getLong("nComponents", 2).toInt
+    val nComponents = parameters.getLong("nComponents", 2)
     //val earlyExaggeration = parameters.getLong("earlyExaggeration")
-    val learningRate = parameters.getDouble("learningRate", 0.1)
-    val iterations = parameters.getLong("iterations", 1000).toInt
+    val learningRate = parameters.getDouble("learningRate", 1000)
+    val iterations = parameters.getLong("iterations", 300)
 
-    val randomState = parameters.getLong("randomState", 0).toInt
-    val neighbors = parameters.getLong("neighbors", 3*perplexity.toInt)
+    val randomState = parameters.getLong("randomState", 0)
+    val neighbors = parameters.getLong("neighbors", 3 * perplexity.toInt)
 
-    // this is for MNIST dataset! change in case of different dataset
-    val input = readInput(inputPath, dimension, env, Array(1,2,3))
+    val input = readInput(inputPath, dimension, env, Array(0,1,2))
 
     val result = computeEmbedding(input, metric, perplexity, nComponents, learningRate, iterations,
       randomState, neighbors)
 
-    result.writeAsCsv(outputPath)
+    result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
     env.execute("TSNE")
   }

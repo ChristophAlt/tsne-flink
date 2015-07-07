@@ -86,9 +86,9 @@ object TsneHelpers {
       input.union(inputTransposed).groupBy(0, 1).reduce((x, y) => (x._1, x._2, x._3 + y._3))
 
     // collect the sum over the joint distribution for normalization
-    val sumP = jointDistribution.sum(2)
+    val sumP = jointDistribution.sum(2).map(x => max(x._3, Double.MinValue))
 
-    jointDistribution.mapWithBcVariable(sumP){(p, sum) => (p._1, p._2, p._3 / sum._3)}
+    jointDistribution.mapWithBcVariable(sumP){(p, sumP) => (p._1, p._2, max(p._3 / sumP, Double.MinValue))}
   }
 
   def initEmbedding(input: DataSet[LabeledVector], randomState: Int): DataSet[LabeledVector] = {
@@ -122,7 +122,7 @@ object TsneHelpers {
           .cross(currentEmbedding) {
           (e1, e2) =>
             //   i         j      /----------------- d ---------------\ /---------- difference vector----------\
-            (e1.label, e2.label, metric.distance(e1.vector, e2.vector), e1.vector.asBreeze - e2.vector.asBreeze)
+            (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), e1.vector.asBreeze - e2.vector.asBreeze)
         }// remove distances == 0
           .filter(_._3 != 0)
 
@@ -141,7 +141,7 @@ object TsneHelpers {
 
         // make affinities a probability distribution by q_ij / sum(qi)
         val lowDimAffinities = unnormAffinities.join(sumAffinities).where(0).equalTo(0) {
-          (aff, sum) => (aff._1, aff._2, aff._3 / sum._3)
+          (aff, sum) => (aff._1, aff._2, max(aff._3 / sum._3, Double.MinValue))
         }
 
         // TODO: compute gradient dC / dy_i with Flink SGD
@@ -232,7 +232,7 @@ object TsneHelpers {
   private def computeH(distances: Seq[(Long, Long, Double)], beta: Double = 1.0): Double = {
     //                          d_i      exp(-d_i * beta)
     val p = distances.map(d => (d._3, exp(-d._3 * beta)))
-    val sumP = p.map(_._2).sum
+    val sumP = if (p.map(_._2).sum == 0.0) 1e-7 else p.map(_._2).sum
     log(sumP) + beta * p.map(p => p._1 * p._2).sum / sumP
   }
 
@@ -240,7 +240,7 @@ object TsneHelpers {
     Seq[(Long, Long, Double)] = {
     //                            i     j      exp(-d_i * beta)
     val p = distances.map(d => (d._1, d._2, exp(-d._3 * beta)))
-    val sumP = p.map(_._3).sum
+    val sumP = if (p.map(_._3).sum == 0.0) 1e-7 else p.map(_._3).sum
     //            i     j      p_i|j
     p.map(p => (p._1, p._2, p._3 / sumP))
   }

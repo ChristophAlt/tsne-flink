@@ -123,6 +123,7 @@ object TsneHelpersTestSuite {
     (6L, 7L, 4.0), (6L, 5L, 4.0), (7L, 8L, 4.0), (7L, 6L, 4.0), (8L, 7L, 4.0), (8L, 6L, 16.0)
   ).toSeq
 
+  // calculated by Van der Maaten Python implementation
   val pairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
     (0L, 1L, 0.733896425817), (0L, 2L, 0.230388739954), (0L, 3L, 0.0334070949154),
     (0L, 4L, 0.00223752119073), (0L, 5L, 6.92223896587e-05), (0L, 6L, 9.89183817531e-07),
@@ -150,6 +151,7 @@ object TsneHelpersTestSuite {
     (8L, 5L, 0.0334070949154), (8L, 6L, 0.230388739954), (8L, 7L, 0.733896425817)
   ).toSeq
 
+  // calculated by Van der Maaten Python implementation
   val jointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
     (0L, 1L, 0.0685498014338), (0L, 2L, 0.0127993744429), (0L, 3L, 0.00185594971752),
     (0L, 4L, 0.000124306732818), (0L, 5L, 3.84568831437e-06), (0L, 6L, 5.49546565295e-08),
