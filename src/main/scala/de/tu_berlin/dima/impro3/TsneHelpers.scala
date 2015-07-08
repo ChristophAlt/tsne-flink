@@ -137,9 +137,13 @@ object TsneHelpers {
         //                     i       j     sum(q_i)
         .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
 
-    // make affinities a probability distribution by q_ij / sum(qi)
-    val lowDimAffinities = unnormAffinities.join(sumAffinities).where(0).equalTo(0) {
-      (aff, sum) => (aff._1, aff._2, max(aff._3 / sum._3, Double.MinValue))
+    val sumOverAllAffinities = unnormAffinities
+      //                     i       j     sum(q_i)
+      .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
+
+    // make affinities a probability distribution by q_ij / sum(q)
+    val lowDimAffinities = unnormAffinities.mapWithBcVariable(sumOverAllAffinities){
+      (q, sumQ) => (q._1, q._2, max(q._3 / sumQ._3, Double.MinValue))
     }
 
     new {
