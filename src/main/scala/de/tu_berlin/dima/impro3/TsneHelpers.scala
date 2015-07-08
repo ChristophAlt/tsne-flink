@@ -39,7 +39,7 @@ object TsneHelpers {
   //============================= TSNE steps ===============================================//
 
   def kNearestNeighbors(input: DataSet[LabeledVector], k: Int, metric: DistanceMetric):
-    DataSet[(Long, Long, Double)] = {
+  DataSet[(Long, Long, Double)] = {
     // compute k nearest neighbors for all points
     input
       .cross(input) {
@@ -58,28 +58,28 @@ object TsneHelpers {
   }
 
   def pairwiseAffinities(input: DataSet[(Long, Long, Double)], perplexity: Double):
-    DataSet[(Long, Long, Double)] = {
+  DataSet[(Long, Long, Double)] = {
     // compute pairwise affinities p_j|i
     input
-        // group on i
-        .groupBy(_._1)
-        // compute pairwise affinities for each point i
-        // binary search for sigma_i and the result is p_j|i
-        .reduceGroup {
-        (knn, affinities: Collector[(Long, Long, Double)]) =>
-          val knnSeq = knn.toSeq
-          // do a binary search to find sigma_i resulting in given perplexity
-          // return pairwise affinities
-          val pwAffinities = binarySearch(knnSeq, perplexity)
-          for (p <- pwAffinities) {
-            affinities.collect(p)
-          }
-      }
+      // group on i
+      .groupBy(_._1)
+      // compute pairwise affinities for each point i
+      // binary search for sigma_i and the result is p_j|i
+      .reduceGroup {
+      (knn, affinities: Collector[(Long, Long, Double)]) =>
+        val knnSeq = knn.toSeq
+        // do a binary search to find sigma_i resulting in given perplexity
+        // return pairwise affinities
+        val pwAffinities = binarySearch(knnSeq, perplexity)
+        for (p <- pwAffinities) {
+          affinities.collect(p)
+        }
+    }
   }
 
   def jointDistribution(input: DataSet[(Long, Long, Double)]): DataSet[(Long, Long, Double)] = {
-    
-    
+
+
     val inputTransposed =
       input.map(x => (x._2, x._1, x._3))
 
@@ -89,7 +89,7 @@ object TsneHelpers {
     // collect the sum over the joint distribution for normalization
     val sumP = jointDistribution.sum(2).map(x => max(x._3, Double.MinValue))
 
-    jointDistribution.mapWithBcVariable(sumP){(p, sumP) => (p._1, p._2, max(p._3 / sumP, Double.MinValue))}
+    jointDistribution.mapWithBcVariable(sumP) { (p, sumP) => (p._1, p._2, max(p._3 / sumP, Double.MinValue)) }
   }
 
   def initEmbedding(input: DataSet[LabeledVector], randomState: Int): DataSet[LabeledVector] = {
@@ -110,42 +110,41 @@ object TsneHelpers {
       }
     })
   }
-  
+
   def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric):
   DataSet[(Long, Long, Double, Vector[Double])] = {
     val distances = points
-        .cross(points) {
+      .cross(points) {
       (e1, e2) =>
         //   i         j      /----------------- d ---------------\ /---------- difference vector----------\
         (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), e1.vector.asBreeze - e2.vector.asBreeze)
-    }// remove distances == 0
-        .filter(_._3 != 0) //TODO: check whether this is really right for dense matrices??
-    
+    } // remove distances == 0
+      .filter(_._3 != 0) //TODO: check whether this is really right for dense matrices??
+
     distances
   }
 
   // Compute Q-matrix and normalization sum
-  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]):
-    {val q : DataSet[(Long, Long, Double)]; val sumQ : DataSet[(Long, Long, Double, Int)]}= {
+  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]): {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[(Long, Long, Double, Int)]} = {
     // unnormalized q_ij
     val unnormAffinities = distances
-        .map { d =>
+      .map { d =>
       // i     j   1 / (1 + dij)
       (d._1, d._2, 1 / (1 + d._3), 1)
     }
 
     // sum over q_i
     val sumAffinities = unnormAffinities
-        .groupBy(_._1)
-        //                     i       j     sum(q_i)
-        .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
+      .groupBy(_._1)
+      //                     i       j     sum(q_i)
+      .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
 
     val sumOverAllAffinities = unnormAffinities
       //                     i       j     sum(q_i)
       .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
 
     // make affinities a probability distribution by q_ij / sum(q)
-    val lowDimAffinities = unnormAffinities.mapWithBcVariable(sumOverAllAffinities){
+    val lowDimAffinities = unnormAffinities.mapWithBcVariable(sumOverAllAffinities) {
       (q, sumQ) => (q._1, q._2, max(q._3 / sumQ._3, Double.MinValue))
     }
 
@@ -180,9 +179,47 @@ object TsneHelpers {
   def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
                learningRate: Double, iterations: Int, metric: DistanceMetric,
                earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double):
-    DataSet[LabeledVector] = {
+  DataSet[LabeledVector] = {
+    var currentIt: Int = 0;
 
-    initialEmbedding.iterate(iterations) {
+
+    //25% of the iterations with early
+
+
+    val iterationComputation = (iterations: Int, embedding: DataSet[LabeledVector], highdimAffinites: DataSet[(Long, Long, Double)]) => {
+      embedding.iterate(iterations) { currentEmbedding =>
+        // compute pairwise differences yi - yj
+        val distances = computeDistances(currentEmbedding, metric)
+        // Compute Q-matrix and normalization sum
+        val results = computeLowDimAffinities(distances)
+
+        val lowDimAffinities = results.q
+        val sumAffinities = results.sumQ
+
+        val dY = gradient(lowDimAffinities, highdimAffinites, sumAffinities, distances)
+
+        // compute new embedding by taking one step in gradient direction
+        val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
+          (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
+        }
+        newEmbedding
+      }
+    };
+
+    // take 25% of iterations with early exaggeration -> maybe parameter?
+    val iterationsEarlyEx = (0.25 * iterations).toInt
+    val normalIterations = iterations - iterationsEarlyEx
+    //Compute exagggerted Embedding
+    val exageratedAffinites = highDimAffinities.map(r => (r._1, r._2, r._3 * earlyExaggeration))
+    val exageratedResults = iterationComputation(iterationsEarlyEx, initialEmbedding, exageratedAffinites)
+    //normal computation
+    val normalResults: DataSet[LabeledVector] = iterationComputation(normalIterations, exageratedResults, highDimAffinities)
+
+    normalResults
+
+    // First Compute with
+    /*
+    val exagarretedEmbedding: DataSet[LabeledVector] = initialEmbedding.iterate(iterationsEarlyEx) {
       currentEmbedding =>
 
         // compute pairwise differences yi - yj
@@ -190,7 +227,28 @@ object TsneHelpers {
 
         // Compute Q-matrix and normalization sum
         val results = computeLowDimAffinities(distances)
-        
+
+        val lowDimAffinities = results.q
+        val sumAffinities = results.sumQ
+
+        val dY = gradient(lowDimAffinities, exageratedAffinites, sumAffinities, distances)
+
+        // compute new embedding by taking one step in gradient direction
+        val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
+          (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
+        }
+        newEmbedding
+    }
+
+    exagarretedEmbedding.iterate(normalIterations) {
+      currentEmbedding =>
+
+        // compute pairwise differences yi - yj
+        val distances = computeDistances(currentEmbedding, metric)
+
+        // Compute Q-matrix and normalization sum
+        val results = computeLowDimAffinities(distances)
+
         val lowDimAffinities = results.q
         val sumAffinities = results.sumQ
 
@@ -201,7 +259,9 @@ object TsneHelpers {
           (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
         }
         newEmbedding
-    }
+    }*/
+
+
   }
 
   //============================= binary search ===============================================//
@@ -229,7 +289,7 @@ object TsneHelpers {
     // otherwise, adapt beta and try again
     else {
       val nextBeta = {
-        if(h - targetH > 0) {
+        if (h - targetH > 0) {
           if (max == Double.PositiveInfinity || max == Double.NegativeInfinity) {
             beta * 2
           }
@@ -238,7 +298,7 @@ object TsneHelpers {
           }
         }
         else {
-          if(min == Double.PositiveInfinity || min == Double.NegativeInfinity) {
+          if (min == Double.PositiveInfinity || min == Double.NegativeInfinity) {
             beta / 2
           }
           else {
@@ -246,7 +306,7 @@ object TsneHelpers {
           }
         }
       }
-      if(h - targetH > 0) {
+      if (h - targetH > 0) {
         // difference is positive -> set lower bound to current guess
         approximateBeta(nextBeta, distances, targetH, h, beta, max, iterations - 1)
       }
@@ -269,7 +329,7 @@ object TsneHelpers {
   }
 
   private def computeP(distances: Seq[(Long, Long, Double)], beta: Double):
-    Seq[(Long, Long, Double)] = {
+  Seq[(Long, Long, Double)] = {
     //                            i     j      exp(-d_i * beta)
     val p = distances.map(d => (d._1, d._2, exp(-d._3 * beta)))
     val sumP = if (p.map(_._3).sum == 0.0) 1e-7 else p.map(_._3).sum
