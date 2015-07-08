@@ -55,7 +55,7 @@ object Tsne {
     val input = readInput(inputPath, dimension, env, Array(0,1,2))
 
     val result = computeEmbedding(input, metric, perplexity, nComponents, learningRate, iterations,
-      randomState, neighbors)
+      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 

@@ -28,6 +28,7 @@ import org.apache.flink.ml.metrics.distances.DistanceMetric
 import org.apache.flink.util.Collector
 import org.apache.flink.ml._
 import org.apache.flink.ml.math.Breeze._
+import breeze.linalg.Vector
 
 import scala.math._
 import scala.util.Random
@@ -110,7 +111,8 @@ object TsneHelpers {
     })
   }
   
-  def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric) = {
+  def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric):
+  DataSet[(Long, Long, Double, Vector[Double])] = {
     val distances = points
         .cross(points) {
       (e1, e2) =>
@@ -123,7 +125,8 @@ object TsneHelpers {
   }
 
   // Compute Q-matrix and normalization sum
-  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]): {val q : DataSet[(Long, Long, Double)];val sumQ : DataSet[(Long, Long, Double, Int)]}= {
+  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]):
+    {val q : DataSet[(Long, Long, Double)]; val sumQ : DataSet[(Long, Long, Double, Int)]}= {
     // unnormalized q_ij
     val unnormAffinities = distances
         .map { d =>
@@ -152,7 +155,29 @@ object TsneHelpers {
     }
   }
 
-  def optimize(input: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
+  def gradient(lowDimAffinities: DataSet[(Long, Long, Double)],
+               highDimAffinities: DataSet[(Long, Long, Double)], sumAffinities: DataSet[(Long, Long, Double, Int)],
+               distances: DataSet[(Long, Long, Double, Vector[Double])]) = {
+    // this is not the optimized version
+    highDimAffinities
+      .join(lowDimAffinities).where(0, 1).equalTo(0, 1) {
+      //                      (pij - qij)   * qij
+      (h, l) => (h._1, h._2, (h._3 - l._3) * l._3)
+    }
+      .join(sumAffinities).where(0).equalTo(0) {
+      //         (pij - qij)* qij * Z
+      (l, z) => (l._1, l._2, l._3 * z._3)
+    }
+      .join(distances).where(0).equalTo(0) {
+      //     (pij - qij)* qij * Z * (yi - yj)
+      (l, d) => (l._1, l._2, l._3 * d._4)
+    }
+      .groupBy(_._1)
+      .reduce((g1, g2) => (g1._1, g1._2, g1._3 + g2._3))
+      .map(g => LabeledVector(g._1, (4.0 * g._3).fromBreeze))
+  }
+
+  def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
                learningRate: Double, iterations: Int, metric: DistanceMetric,
                earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double):
     DataSet[LabeledVector] = {
@@ -169,26 +194,10 @@ object TsneHelpers {
         val lowDimAffinities = results.q
         val sumAffinities = results.sumQ
 
-        // this is not the optimized version
-        val gradient = input
-          .join(lowDimAffinities).where(0, 1).equalTo(0, 1) {
-          //                      (pij - qij)   * qij
-          (h, l) => (h._1, h._2, (h._3 - l._3) * l._3)
-        }
-          .join(sumAffinities).where(0).equalTo(0) {
-          //         (pij - qij)* qij * Z
-          (l, z) => (l._1, l._2, l._3 * z._3)
-        }
-          .join(distances).where(0).equalTo(0) {
-          //     (pij - qij)* qij * Z * (yi - yj)
-          (l, d) => (l._1, l._2, l._3 * d._4)
-        }
-          .groupBy(_._1)
-          .reduce((g1, g2) => (g1._1, g1._2, g1._3 + g2._3))
-          .map(g => LabeledVector(g._1, (4.0 * g._3).fromBreeze))
+        val dY = gradient(lowDimAffinities, highDimAffinities, sumAffinities, distances)
 
         // compute new embedding by taking one step in gradient direction
-        val newEmbedding = currentEmbedding.join(gradient).where(0).equalTo(0) {
+        val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
           (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
         }
         newEmbedding
