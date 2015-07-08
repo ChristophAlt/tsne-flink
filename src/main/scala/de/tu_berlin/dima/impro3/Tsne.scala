@@ -42,12 +42,15 @@ object Tsne {
     val metric = SquaredEuclideanDistanceMetric()
     val perplexity = parameters.getDouble("perplexity", 30.0)
     val nComponents = parameters.getLong("nComponents", 2)
-    //val earlyExaggeration = parameters.getLong("earlyExaggeration")
+    val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
     val learningRate = parameters.getDouble("learningRate", 1000)
     val iterations = parameters.getLong("iterations", 300)
 
     val randomState = parameters.getLong("randomState", 0)
     val neighbors = parameters.getLong("neighbors", 3 * perplexity.toInt)
+
+    val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
+    val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
 
     val input = readInput(inputPath, dimension, env, Array(0,1,2))
 
@@ -72,7 +75,9 @@ object Tsne {
 
   private def computeEmbedding(input: DataSet[LabeledVector], metric: DistanceMetric,
                                perplexity: Double, nComponents: Int, learningRate: Double,
-                               iterations: Int, randomState: Int, neighbors: Int):
+                               iterations: Int, randomState: Int, neighbors: Int,
+                               earlyExaggeration: Double, initialMomentum: Double,
+                               finalMomentum: Double):
   DataSet[LabeledVector] = {
 
     // TODO: center data or do this somewhere before in the pipeline
@@ -85,6 +90,7 @@ object Tsne {
     val initialEmbedding = initEmbedding(input, randomState)
 
     // TODO: early exaggeration and early compression
-    optimize(jntDistribution, initialEmbedding, learningRate, iterations, metric)
+    optimize(jntDistribution, initialEmbedding, learningRate, iterations, metric, earlyExaggeration,
+      initialMomentum, finalMomentum)
   }
 }

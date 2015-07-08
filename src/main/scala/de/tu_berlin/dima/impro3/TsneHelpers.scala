@@ -153,7 +153,8 @@ object TsneHelpers {
   }
 
   def optimize(input: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
-               learningRate: Double, iterations: Int, metric: DistanceMetric):
+               learningRate: Double, iterations: Int, metric: DistanceMetric,
+               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double):
     DataSet[LabeledVector] = {
 
     initialEmbedding.iterate(iterations) {
