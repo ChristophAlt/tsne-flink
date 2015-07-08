@@ -28,7 +28,6 @@ import org.apache.flink.ml.metrics.distances.DistanceMetric
 import org.apache.flink.util.Collector
 import org.apache.flink.ml._
 import org.apache.flink.ml.math.Breeze._
-import breeze.linalg.Vector
 
 import scala.math._
 import scala.util.Random
@@ -112,7 +111,7 @@ object TsneHelpers {
   }
   
   def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric):
-  DataSet[(Long, Long, Double, Vector[Double])] = {
+  DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])] = {
     val distances = points
         .cross(points) {
       (e1, e2) =>
@@ -157,7 +156,7 @@ object TsneHelpers {
 
   def gradient(lowDimAffinities: DataSet[(Long, Long, Double)],
                highDimAffinities: DataSet[(Long, Long, Double)], sumAffinities: DataSet[(Long, Long, Double, Int)],
-               distances: DataSet[(Long, Long, Double, Vector[Double])]) = {
+               distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]): DataSet[LabeledVector] = {
     // this is not the optimized version
     highDimAffinities
       .join(lowDimAffinities).where(0, 1).equalTo(0, 1) {
@@ -175,6 +174,16 @@ object TsneHelpers {
       .groupBy(_._1)
       .reduce((g1, g2) => (g1._1, g1._2, g1._3 + g2._3))
       .map(g => LabeledVector(g._1, (4.0 * g._3).fromBreeze))
+  }
+
+  def centerEmbedding(embedding: DataSet[LabeledVector]): DataSet[LabeledVector] = {
+    // center embedding
+    val sumAndCount = embedding.map(x => (x.vector.asBreeze, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
+
+
+    embedding.mapWithBcVariable(sumAndCount){
+      (lv, sumAndCount) => LabeledVector(lv.label, (lv.vector.asBreeze - (sumAndCount._1 :/ sumAndCount._2.toDouble)).fromBreeze)
+    }
   }
 
   def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
@@ -198,9 +207,11 @@ object TsneHelpers {
 
         // compute new embedding by taking one step in gradient direction
         val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
+          // TODO: add momentum and gains
           (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
         }
-        newEmbedding
+
+        centerEmbedding(newEmbedding)
     }
   }
 
