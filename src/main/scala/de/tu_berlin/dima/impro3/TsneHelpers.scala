@@ -180,7 +180,7 @@ object TsneHelpers {
     val sumAndCount = embedding.map(x => (x.vector.asBreeze, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
 
 
-    embedding.mapWithBcVariable(sumAndCount){
+    embedding.mapWithBcVariable(sumAndCount) {
       (lv, sumAndCount) => LabeledVector(lv.label, (lv.vector.asBreeze - (sumAndCount._1 :/ sumAndCount._2.toDouble)).fromBreeze)
     }
   }
@@ -189,13 +189,8 @@ object TsneHelpers {
                learningRate: Double, iterations: Int, metric: DistanceMetric,
                earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double):
   DataSet[LabeledVector] = {
-    var currentIt: Int = 0;
-
-
-    //25% of the iterations with early
-
-
-    val iterationComputation = (iterations: Int, embedding: DataSet[LabeledVector], highdimAffinites: DataSet[(Long, Long, Double)]) => {
+    //compute Function
+    val iterationComputation = (iterations: Int, momentum: Double, embedding: DataSet[LabeledVector], highdimAffinites: DataSet[(Long, Long, Double)]) => {
       embedding.iterate(iterations) { currentEmbedding =>
         // compute pairwise differences yi - yj
         val distances = computeDistances(currentEmbedding, metric)
@@ -209,20 +204,19 @@ object TsneHelpers {
 
         // compute new embedding by taking one step in gradient direction
         val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
-          (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
+          (c, g) => LabeledVector(c.label, (momentum * c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
         }
         newEmbedding
       }
     };
-
     // take 25% of iterations with early exaggeration -> maybe parameter?
     val iterationsEarlyEx = (0.25 * iterations).toInt
     val normalIterations = iterations - iterationsEarlyEx
     //Compute exagggerted Embedding
     val exageratedAffinites = highDimAffinities.map(r => (r._1, r._2, r._3 * earlyExaggeration))
-    val exageratedResults = iterationComputation(iterationsEarlyEx, initialEmbedding, exageratedAffinites)
+    val exageratedResults = iterationComputation(iterationsEarlyEx, initialMomentum, initialEmbedding, exageratedAffinites)
     //normal computation
-    val normalResults: DataSet[LabeledVector] = iterationComputation(normalIterations, exageratedResults, highDimAffinities)
+    val normalResults: DataSet[LabeledVector] = iterationComputation(normalIterations, finalMomentum, exageratedResults, highDimAffinities)
 
     normalResults
 
