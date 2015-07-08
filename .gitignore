@@ -17,3 +17,4 @@ project/plugins/project/
 # Scala-IDE specific
 .scala_dependencies
 .worksheet
+src/main/scala/de/tu_berlin/dima/impro3/TsneHelpers.scala.orig

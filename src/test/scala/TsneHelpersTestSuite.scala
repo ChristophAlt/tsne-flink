@@ -125,8 +125,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val y = env.fromCollection(TsneHelpersTestSuite.yInit)
     val DD = computeDistances(y, SquaredEuclideanDistanceMetric())
-    
-    //TODO: check this function and where the error is ...
+
     val results = computeLowDimAffinities(DD).q.collect()
     
     val expectedResults = TsneHelpersTestSuite.QDense
@@ -138,6 +137,24 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
         case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case _ => fail("expected result not found")
+      }
+    }
+  }
+
+  "centerEmbedding" should "compute the centered embedding as LabeledVectors" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val embedding = env.fromCollection(TsneHelpersTestSuite.embedding)
+    val results = centerEmbedding(embedding).collect()
+
+    val expectedResults = TsneHelpersTestSuite.centeredEmbedding
+
+    results.size should equal (expectedResults.size)
+    for (expected <- expectedResults) {
+      val result = results.find(x => x.label == expected.label)
+      result match {
+        case Some(result) => result.vector should equal (expected.vector)
         case _ => fail("expected result not found")
       }
     }
@@ -440,5 +457,17 @@ object TsneHelpersTestSuite {
     (11L, 2L, 0.00757575754529), (11L, 3L, 0.00757575736326), (11L, 4L, 0.00757575772141),
     (11L, 5L, 0.00757575747584), (11L, 6L, 0.00757575667571), (11L, 7L, 0.00757575775873),
     (11L, 8L, 0.00757575767469), (11L, 9L, 0.00757575762788), (11L, 10L, 0.0075757573806)
+  ).toSeq
+
+  val embedding: Seq[LabeledVector] = List(
+    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, -2.0),(1, 4.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -6.0),(1, 4.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 2.0),(1, -8.0))))
+  ).toSeq
+
+  val centeredEmbedding: Seq[LabeledVector] = List(
+    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, 0.0),(1, 4.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -4.0),(1, 4.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 4.0),(1, -8.0))))
   ).toSeq
 }
