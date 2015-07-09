@@ -207,22 +207,20 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val results = gradient(r.q, P, r.sumQ, DD).collect()
 
-    //TODO: error here!!!
-    print (results)
-
-    
-
     val expectedResults = TsneHelpersTestSuite.gradientPython
-
-    /*
+    
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x.label == expected.label)
       result match {
-        case Some(result) => result.vector should equal (expected.vector.asBreeze +- 1e-6)
+        case Some(result) => {
+          for (i <- 0 until result.vector.size){
+            result.vector(i) should equal (expected.vector(i) +- 1e-6)
+          }
+        }
         case _ => fail("expected result not found")
       }
-    }*/
+    }
   }
 }
 
