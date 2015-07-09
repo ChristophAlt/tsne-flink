@@ -23,7 +23,7 @@ import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math.DenseVector
+import org.apache.flink.ml.math.{Vector, DenseVector}
 import org.apache.flink.ml.metrics.distances.DistanceMetric
 import org.apache.flink.util.Collector
 import org.apache.flink.ml._
@@ -111,12 +111,12 @@ object TsneHelpers {
   }
 
   def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric):
-  DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])] = {
+  DataSet[(Long, Long, Double, Vector)] = {
     val distances = points
       .cross(points) {
       (e1, e2) =>
         //   i         j      /----------------- d ---------------\ /---------- difference vector----------\
-        (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), e1.vector.asBreeze - e2.vector.asBreeze)
+        (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), (e1.vector.asBreeze - e2.vector.asBreeze).fromBreeze)
     } // remove distances == 0
       .filter(_._3 != 0) //TODO: check whether this is really right for dense matrices??
 
@@ -124,44 +124,50 @@ object TsneHelpers {
   }
 
   // Compute Q-matrix and normalization sum
-  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]): {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[(Long, Long, Double, Int)]} = {
+  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, Vector)]):
+    {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[Double]} = {
     // unnormalized q_ij
     val unnormAffinities = distances
       .map { d =>
       // i     j   1 / (1 + dij)
-      (d._1, d._2, 1 / (1 + d._3), 1)
+      (d._1, d._2, 1 / (1 + d._3))
     }
 
     // sum over q_i
-    val sumAffinities = unnormAffinities
+    /*val sumAffinities = unnormAffinities
       .groupBy(_._1)
       //                     i       j     sum(q_i)
-      .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
+      .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3))*/
 
-    val sumOverAllAffinities = unnormAffinities
-      //                     i       j     sum(q_i)
-      .reduce((a1, a2) => (a1._1, a1._2, a1._3 + a2._3, 1))
+    val sumOverAllAffinities = unnormAffinities.sum(2).map(x => x._3)
 
-    // make affinities a probability distribution by q_ij / sum(q)
+    /*// make affinities a probability distribution by q_ij / sum(q)
     val lowDimAffinities = unnormAffinities.mapWithBcVariable(sumOverAllAffinities) {
-      (q, sumQ) => (q._1, q._2, max(q._3 / sumQ._3, Double.MinValue))
-    }
+      (q, sumQ) => (q._1, q._2, max(q._3 / sumQ, Double.MinValue))
+    }*/
 
     new {
-      val q = lowDimAffinities
-      val sumQ = sumAffinities
+      val q = unnormAffinities
+      val sumQ = sumOverAllAffinities
     }
   }
 
   def gradient(lowDimAffinities: DataSet[(Long, Long, Double)],
-               highDimAffinities: DataSet[(Long, Long, Double)], sumAffinities: DataSet[(Long, Long, Double, Int)],
-               distances: DataSet[(Long, Long, Double, breeze.linalg.Vector[Double])]): DataSet[LabeledVector] = {
+               highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double],
+               distances: DataSet[(Long, Long, Double, Vector)]): DataSet[LabeledVector] = {
     // this is not the optimized version
     highDimAffinities
-      .join(lowDimAffinities).where(0, 1).equalTo(0, 1) {
-      //                      (pij - qij)   * qij
-      (h, l) => (h._1, h._2, (h._3 - l._3) * l._3)
-    }
+      .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
+      //                i           j       (p - (q / sum(q)) * q
+      (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - (pQ._2._3 / sumQ)) * pQ._1._3)
+    }.join(distances).where(0, 1).equalTo(0, 1) {
+      (mul, d) => (mul._1, mul._2, (mul._3 * d._4.asBreeze).fromBreeze)
+    }.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2, (v1._3.asBreeze + v2._3.asBreeze).fromBreeze))
+      .map(g => LabeledVector(g._1, g._3))
+      /*{
+        //                      (pij - qij)   * qij
+        (h, l) => (h._1, h._2, (h._3 - l._3) * l._3)
+      }
       .join(sumAffinities).where(0).equalTo(0) {
       //         (pij - qij)* qij * Z
       (l, z) => (l._1, l._2, l._3 * z._3)
@@ -172,7 +178,7 @@ object TsneHelpers {
     }
       .groupBy(_._1)
       .reduce((g1, g2) => (g1._1, g1._2, g1._3 + g2._3))
-      .map(g => LabeledVector(g._1, (4.0 * g._3).fromBreeze))
+      .map(g => LabeledVector(g._1, (4.0 * g._3).fromBreeze))*/
   }
 
   def centerEmbedding(embedding: DataSet[LabeledVector]): DataSet[LabeledVector] = {
@@ -204,11 +210,12 @@ object TsneHelpers {
 
         // compute new embedding by taking one step in gradient direction
         val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
-          (c, g) => LabeledVector(c.label, (momentum * c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
+          (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
         }
-        newEmbedding
+        centerEmbedding(newEmbedding)
       }
-    };
+    }
+
     // take 25% of iterations with early exaggeration -> maybe parameter?
     val iterationsEarlyEx = (0.25 * iterations).toInt
     val normalIterations = iterations - iterationsEarlyEx
