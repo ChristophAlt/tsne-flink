@@ -80,14 +80,15 @@ object Tsne {
                                finalMomentum: Double):
   DataSet[LabeledVector] = {
 
-    // TODO: center data or do this somewhere before in the pipeline
-    val knn = kNearestNeighbors(input, neighbors, metric)
+    val centeredInput = centerEmbedding(input)
+    
+    val knn = kNearestNeighbors(centeredInput, neighbors, metric)
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    val initialEmbedding = initEmbedding(input, randomState)
+    val initialEmbedding = initEmbedding(centeredInput, randomState)
 
     // TODO: early exaggeration and early compression
     optimize(jntDistribution, initialEmbedding, learningRate, iterations, metric, earlyExaggeration,
