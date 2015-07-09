@@ -151,6 +151,27 @@ object TsneHelpers {
       val sumQ = sumOverAllAffinities
     }
   }
+  
+  def calcPQ_unittest(lowDimAffinities: DataSet[(Long, Long, Double)],
+               highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double]) = {
+        highDimAffinities
+        .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
+      //                i           j       (p - (num / sum(num)) * num
+      //                                    (p -  q)              * num    
+      (pQ, sumQ) => (pQ._1._1, pQ._1._2, pQ._1._3 - (pQ._2._3 / sumQ))
+    }
+  }
+
+  /*
+  def calcPQTimesNum_unittest(lowDimAffinities: DataSet[(Long, Long, Double)],
+                      highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double]) = {
+    highDimAffinities
+        .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
+      //                i           j       (p - (num / sum(num)) * num
+      //                                    (p -  q)              * num    
+      (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - (pQ._2._3 / sumQ)) * pQ._1._3)
+    }
+  }*/
 
   def gradient(lowDimAffinities: DataSet[(Long, Long, Double)],
                highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double],
@@ -160,8 +181,10 @@ object TsneHelpers {
       .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
       //                i           j       (p - (q / sum(q)) * q
       (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - (pQ._2._3 / sumQ)) * pQ._2._3)
+
     }.join(distances).where(0, 1).equalTo(0, 1) {
-      (mul, d) => (mul._1, mul._2, (mul._3 * d._4.asBreeze).fromBreeze)
+    //                             ((p -  q)* num) * (yi -yj)      
+      (mul, d) => (mul._1, mul._2, (mul._3         * d._4.asBreeze).fromBreeze)
     }.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2, (v1._3.asBreeze + v2._3.asBreeze).fromBreeze))
       .map(g => LabeledVector(g._1, g._3))
       /*{
