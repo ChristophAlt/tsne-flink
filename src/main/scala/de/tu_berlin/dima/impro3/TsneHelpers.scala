@@ -162,17 +162,6 @@ object TsneHelpers {
     }
   }
 
-  /*
-  def calcPQTimesNum_unittest(lowDimAffinities: DataSet[(Long, Long, Double)],
-                      highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double]) = {
-    highDimAffinities
-        .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
-      //                i           j       (p - (num / sum(num)) * num
-      //                                    (p -  q)              * num    
-      (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - (pQ._2._3 / sumQ)) * pQ._1._3)
-    }
-  }*/
-
   def gradient(lowDimAffinities: DataSet[(Long, Long, Double)],
                highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double],
                distances: DataSet[(Long, Long, Double, Vector)]): DataSet[LabeledVector] = {
