@@ -212,7 +212,7 @@ object TsneHelpers {
   
   
   def enrichGradientByMomentumAndGain(gradient: DataSet[LabeledVector], workingSet: DataSet[(Double, Vector, Vector, Vector)], minGain: Double, momentum: Double, eta: Double):
-  DataSet[(Double, Vector, Vector)]={
+  DataSet[(Double, Vector, Vector)] = {
     gradient.map(t => (t.label, t.vector)).join(workingSet).where(0).equalTo(0) {
       (dY, rest) =>
         val gain = rest._4
@@ -257,7 +257,7 @@ object TsneHelpers {
         newGains = (gains + 0.2) * ((dY > 0) != (iY > 0)) + (gains * 0.8) * ((dY > 0) == (iY > 0));
 		    newGains[gains < min_gain] = min_gain;
        */
-      
+
       val minGain = 0.01
       val eta = 500
 
@@ -265,8 +265,8 @@ object TsneHelpers {
 
       // compute new embedding by taking one step in gradient direction
       val newEmbedding = currentEmbedding.join(regularizedGradient).where(0).equalTo(0) {
-        (c, g) => 
-            val newY = (c.vector.asBreeze + g._2.asBreeze).fromBreeze
+        (c, g) =>
+          val newY = (c.vector.asBreeze + g._2.asBreeze).fromBreeze
           LabeledVector(c.label, newY)
       }
       val centeredEmbedding = centerEmbedding(newEmbedding)
@@ -274,13 +274,10 @@ object TsneHelpers {
       val nextIteration = centeredEmbedding.join(regularizedGradient).where(0).equalTo(0) {
         (c, g) =>
           (c.label, c.vector, g._2.asInstanceOf[Vector], g._3.asInstanceOf[Vector])
-      }    
-      
+      }
+
       nextIteration
     }
-      
-      
-    null: DataSet[LabeledVector]
   }
 
   def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialWorkingSet: DataSet[(Double, Vector, Vector, Vector)],
