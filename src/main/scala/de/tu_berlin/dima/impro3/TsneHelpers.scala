@@ -23,7 +23,7 @@ import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math.{Vector, DenseVector}
+import org.apache.flink.ml.math.{DenseVector, Vector}
 import org.apache.flink.ml.metrics.distances.DistanceMetric
 import org.apache.flink.util.Collector
 import org.apache.flink.ml._
@@ -91,10 +91,10 @@ object TsneHelpers {
     jointDistribution.mapWithBcVariable(sumP) { (p, sumP) => (p._1, p._2, max(p._3 / sumP, Double.MinValue)) }
   }
 
-  def initEmbedding(input: DataSet[LabeledVector], randomState: Int): DataSet[LabeledVector] = {
+  def initWorkingSet(input: DataSet[LabeledVector], dimension: Int, randomState: Int): DataSet[(Double, Vector, Vector, Vector)] = {
     // init Y (embedding) by sampling from N(0, 10e-4*I)
     input
-      .map(new RichMapFunction[LabeledVector, LabeledVector] {
+      .map(new RichMapFunction[LabeledVector, (Double, Vector, Vector, Vector)] {
       private var gaussian: Random = null
       private val sigma = 10e-2
 
@@ -102,10 +102,17 @@ object TsneHelpers {
         gaussian = new Random(randomState)
       }
 
-      def map(inp: LabeledVector): LabeledVector = {
-        // TODO: extend to higher dimensional cases
-        //                i                                y0                         y1
-        LabeledVector(inp.label, DenseVector(gaussian.nextDouble * sigma, gaussian.nextDouble * sigma))
+      def map(inp: LabeledVector): (Double, Vector, Vector, Vector) = {
+        var yValues = Array.fill(dimension){gaussian.nextDouble * sigma}
+        var lastGradientValues = Array.fill(dimension){(0.0).toDouble}
+        var gainValues = Array.fill(dimension){(1.0).toDouble}
+        
+        val y = DenseVector(yValues)
+        val lastGradient = DenseVector(lastGradientValues)
+        val gains = DenseVector(gainValues)
+        
+        (inp.label, y, lastGradient, gains)
+        
       }
     })
   }
@@ -202,42 +209,101 @@ object TsneHelpers {
       (lv, sumAndCount) => LabeledVector(lv.label, (lv.vector.asBreeze - (sumAndCount._1 :/ sumAndCount._2.toDouble)).fromBreeze)
     }
   }
+  
+  
+  def enrichGradientByMomentumAndGain(gradient: DataSet[LabeledVector], workingSet: DataSet[(Double, Vector, Vector, Vector)], minGain: Double, momentum: Double, eta: Double):
+  DataSet[(Double, Vector, Vector)]={
+    gradient.map(t => (t.label, t.vector)).join(workingSet).where(0).equalTo(0) {
+      (dY, rest) =>
+        val gain = rest._4
+        val lastGradient = rest._3
+        val currentGradient = dY._2
+        val dimensionality = gain.size
 
-  def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialEmbedding: DataSet[LabeledVector],
+        var newGain = new Array[Double](dimensionality)
+        var newGradient = new Array[Double](dimensionality)
+
+        for (i <- 0 until dimensionality) {
+          if (currentGradient (i) > 0.0 && lastGradient(i) > 0.0) {
+            newGain(i) = Math.max(gain(i) * 0.8, minGain)
+          } else {
+            newGain(i) = Math.max(gain(i) + 0.2, minGain)
+          }
+          newGradient(i) = momentum * lastGradient(i) - eta * (newGain(i) * currentGradient(i))
+        }
+        (dY._1, DenseVector(newGradient), DenseVector(newGain))
+    }
+  }
+  
+  def iterationComputation (iterations: Int, momentum: Double, workingSet: DataSet[(Double, Vector, Vector, Vector)], highdimAffinites: DataSet[(Long, Long, Double)], metric: DistanceMetric, learningRate: Double) = {
+    workingSet.iterate(iterations) { workingSet =>
+
+      val currentEmbedding = workingSet.map { t => LabeledVector(t._1, t._2) }
+      //val lastGradient = workingSet.map { t => (t._1, t._3) }
+      //val currentGain = workingSet.map { t => (t._1, t._4) }
+
+      // compute pairwise differences yi - yj
+      val distances = computeDistances(currentEmbedding, metric)
+      // Compute Q-matrix and normalization sum
+      val results = computeLowDimAffinities(distances)
+
+      val lowDimAffinities = results.q
+      val sumAffinities = results.sumQ
+
+      val dY = gradient(lowDimAffinities, highdimAffinites, sumAffinities, distances)
+
+
+      /*
+        newGains = (gains + 0.2) * ((dY > 0) != (iY > 0)) + (gains * 0.8) * ((dY > 0) == (iY > 0));
+		    newGains[gains < min_gain] = min_gain;
+       */
+      
+      val minGain = 0.01
+      val eta = 500
+
+      val regularizedGradient = enrichGradientByMomentumAndGain(dY, workingSet, minGain, momentum, eta)
+
+      // compute new embedding by taking one step in gradient direction
+      val newEmbedding = currentEmbedding.join(regularizedGradient).where(0).equalTo(0) {
+        (c, g) => 
+            val newY = (c.vector.asBreeze + g._2.asBreeze).fromBreeze
+          LabeledVector(c.label, newY)
+      }
+      val centeredEmbedding = centerEmbedding(newEmbedding)
+
+      val nextIteration = centeredEmbedding.join(regularizedGradient).where(0).equalTo(0) {
+        (c, g) =>
+          (c.label, c.vector, g._2.asInstanceOf[Vector], g._3.asInstanceOf[Vector])
+      }    
+      
+      nextIteration
+    }
+      
+      
+    null: DataSet[LabeledVector]
+  }
+
+  def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialWorkingSet: DataSet[(Double, Vector, Vector, Vector)],
                learningRate: Double, iterations: Int, metric: DistanceMetric,
                earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double):
   DataSet[LabeledVector] = {
-    //compute Function
-    val iterationComputation = (iterations: Int, momentum: Double, embedding: DataSet[LabeledVector], highdimAffinites: DataSet[(Long, Long, Double)]) => {
-      embedding.iterate(iterations) { currentEmbedding =>
-        // compute pairwise differences yi - yj
-        val distances = computeDistances(currentEmbedding, metric)
-        // Compute Q-matrix and normalization sum
-        val results = computeLowDimAffinities(distances)
+    
 
-        val lowDimAffinities = results.q
-        val sumAffinities = results.sumQ
-
-        val dY = gradient(lowDimAffinities, highdimAffinites, sumAffinities, distances)
-
-        // compute new embedding by taking one step in gradient direction
-        val newEmbedding = currentEmbedding.join(dY).where(0).equalTo(0) {
-          (c, g) => LabeledVector(c.label, (c.vector.asBreeze - (learningRate * g.vector.asBreeze)).fromBreeze)
-        }
-        centerEmbedding(newEmbedding)
-      }
-    }
-
+    
+    
+    /*
     // take 25% of iterations with early exaggeration -> maybe parameter?
     val iterationsEarlyEx = (0.25 * iterations).toInt
     val normalIterations = iterations - iterationsEarlyEx
     //Compute exagggerted Embedding
     val exageratedAffinites = highDimAffinities.map(r => (r._1, r._2, r._3 * earlyExaggeration))
+    */
+    /*
     val exageratedResults = iterationComputation(iterationsEarlyEx, initialMomentum, initialEmbedding, exageratedAffinites)
     //normal computation
     val normalResults: DataSet[LabeledVector] = iterationComputation(normalIterations, finalMomentum, exageratedResults, highDimAffinities)
-
     normalResults
+    */
 
     // First Compute with
     /*
@@ -285,7 +351,7 @@ object TsneHelpers {
         newEmbedding
     }*/
 
-
+    null: DataSet[LabeledVector]
   }
 
   //============================= binary search ===============================================//

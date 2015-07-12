@@ -54,7 +54,7 @@ object Tsne {
 
     val input = readInput(inputPath, dimension, env, Array(0,1,2))
 
-    val result = computeEmbedding(input, metric, perplexity, nComponents, learningRate, iterations,
+    val result = computeEmbedding(input, metric, perplexity, dimension, nComponents, learningRate, iterations,
       randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
@@ -74,7 +74,7 @@ object Tsne {
   }
 
   private def computeEmbedding(input: DataSet[LabeledVector], metric: DistanceMetric,
-                               perplexity: Double, nComponents: Int, learningRate: Double,
+                               perplexity: Double, dimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
                                finalMomentum: Double):
@@ -88,10 +88,9 @@ object Tsne {
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    val initialEmbedding = initEmbedding(centeredInput, randomState)
+    val initialWorkingSet = initWorkingSet(centeredInput, dimension, randomState)
 
-    // TODO: early exaggeration and early compression
-    optimize(jntDistribution, initialEmbedding, learningRate, iterations, metric, earlyExaggeration,
+    optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
       initialMomentum, finalMomentum)
   }
 }
