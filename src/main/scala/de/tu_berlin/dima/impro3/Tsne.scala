@@ -54,7 +54,7 @@ object Tsne {
 
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
-    val result = computeEmbedding(input, metric, perplexity, inputDimension, nComponents, learningRate, iterations,
+    val result = computeEmbedding(env, input, metric, perplexity, inputDimension, nComponents, learningRate, iterations,
       randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
@@ -73,22 +73,24 @@ object Tsne {
     })
   }
 
-  private def computeEmbedding(input: DataSet[LabeledVector], metric: DistanceMetric,
+  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[LabeledVector], metric: DistanceMetric,
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
                                finalMomentum: Double):
   DataSet[LabeledVector] = {
 
-    val centeredInput = centerEmbedding(input)
+    //val centeredInput = centerInput(input)
     
-    val knn = kNearestNeighbors(centeredInput, neighbors, metric)
+    //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
+    val knn = kNearestNeighbors(input, neighbors, metric)
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
+    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
+    val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
 
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
       initialMomentum, finalMomentum)
