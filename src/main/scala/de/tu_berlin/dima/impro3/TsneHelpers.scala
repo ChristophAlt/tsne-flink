@@ -47,7 +47,7 @@ object TsneHelpers {
         (v1.label.toLong, v2.label.toLong, metric.distance(v1.vector, v2.vector))
     }
       // remove distances == 0
-      .filter(_._3 != 0)
+      .filter(x => x._1 != x._2)
       // group by i
       .groupBy(_._1)
       // sort
@@ -78,7 +78,6 @@ object TsneHelpers {
 
   def jointDistribution(input: DataSet[(Long, Long, Double)]): DataSet[(Long, Long, Double)] = {
 
-
     val inputTransposed =
       input.map(x => (x._2, x._1, x._3))
 
@@ -91,7 +90,7 @@ object TsneHelpers {
     jointDistribution.mapWithBcVariable(sumP) { (p, sumP) => (p._1, p._2, max(p._3 / sumP, Double.MinValue)) }
   }
 
-  def initWorkingSet(input: DataSet[LabeledVector], dimension: Int, randomState: Int): DataSet[(Double, Vector, Vector, Vector)] = {
+  def initWorkingSet(input: DataSet[LabeledVector], nComponents: Int, randomState: Int): DataSet[(Double, Vector, Vector, Vector)] = {
     // init Y (embedding) by sampling from N(0, 10e-4*I)
     input
       .map(new RichMapFunction[LabeledVector, (Double, Vector, Vector, Vector)] {
@@ -103,16 +102,19 @@ object TsneHelpers {
       }
 
       def map(inp: LabeledVector): (Double, Vector, Vector, Vector) = {
-        var yValues = Array.fill(dimension){gaussian.nextDouble * sigma}
-        var lastGradientValues = Array.fill(dimension){(0.0).toDouble}
-        var gainValues = Array.fill(dimension){(1.0).toDouble}
+        /*var yValues = Array.fill(nComponents){gaussian.nextDouble * sigma, gaussian.nextDouble * sigma}
+        var lastGradientValues = Array.fill(nComponents){(0.0).toDouble}
+        var gainValues = Array.fill(nComponents){(1.0).toDouble}
         
         val y = DenseVector(yValues)
         val lastGradient = DenseVector(lastGradientValues)
-        val gains = DenseVector(gainValues)
+        val gains = DenseVector(gainValues)*/
+
+        val y = breeze.linalg.DenseVector.rand[Double](nComponents)
+        val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
+        val gains = breeze.linalg.DenseVector.fill(nComponents, 0.0)
         
-        (inp.label, y, lastGradient, gains)
-        
+        (inp.label, y.fromBreeze, lastGradient.fromBreeze, gains.fromBreeze)
       }
     })
   }
@@ -183,21 +185,6 @@ object TsneHelpers {
       (mul, d) => (mul._1, mul._2, (mul._3         * d._4.asBreeze).fromBreeze)
     }.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2, (v1._3.asBreeze + v2._3.asBreeze).fromBreeze))
       .map(g => LabeledVector(g._1, g._3))
-      /*{
-        //                      (pij - qij)   * qij
-        (h, l) => (h._1, h._2, (h._3 - l._3) * l._3)
-      }
-      .join(sumAffinities).where(0).equalTo(0) {
-      //         (pij - qij)* qij * Z
-      (l, z) => (l._1, l._2, l._3 * z._3)
-    }
-      .join(distances).where(0).equalTo(0) {
-      //     (pij - qij)* qij * Z * (yi - yj)
-      (l, d) => (l._1, l._2, l._3 * d._4)
-    }
-      .groupBy(_._1)
-      .reduce((g1, g2) => (g1._1, g1._2, g1._3 + g2._3))
-      .map(g => LabeledVector(g._1, (4.0 * g._3).fromBreeze))*/
   }
 
   def centerEmbedding(embedding: DataSet[LabeledVector]): DataSet[LabeledVector] = {
@@ -259,9 +246,8 @@ object TsneHelpers {
        */
 
       val minGain = 0.01
-      val eta = 500
 
-      val regularizedGradient = enrichGradientByMomentumAndGain(dY, workingSet, minGain, momentum, eta)
+      val regularizedGradient = enrichGradientByMomentumAndGain(dY, workingSet, minGain, momentum, learningRate)
 
       // compute new embedding by taking one step in gradient direction
       val newEmbedding = currentEmbedding.join(regularizedGradient).where(0).equalTo(0) {
@@ -370,7 +356,7 @@ object TsneHelpers {
 
     // check whether we reached the expected entropy or we're out of iterations
     // in both cases, compute p_j|i
-    if (isCloseEnough(h, previousH) || iterations == 0) {
+    if (isCloseEnough(h, targetH) || iterations == 0) {
       computeP(distances, beta)
     }
     // otherwise, adapt beta and try again
