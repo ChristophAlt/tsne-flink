@@ -37,7 +37,7 @@ object Tsne {
     val inputPath = parameters.getRequired("input")
     val outputPath = parameters.getRequired("output")
 
-    val dimension = parameters.getRequired("dimension").toInt
+    val inputDimension = parameters.getRequired("dimension").toInt
 
     val metric = SquaredEuclideanDistanceMetric()
     val perplexity = parameters.getDouble("perplexity", 30.0)
@@ -52,9 +52,9 @@ object Tsne {
     val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
 
-    val input = readInput(inputPath, dimension, env, Array(0,1,2))
+    val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
-    val result = computeEmbedding(input, metric, perplexity, dimension, nComponents, learningRate, iterations,
+    val result = computeEmbedding(input, metric, perplexity, inputDimension, nComponents, learningRate, iterations,
       randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
@@ -74,7 +74,7 @@ object Tsne {
   }
 
   private def computeEmbedding(input: DataSet[LabeledVector], metric: DistanceMetric,
-                               perplexity: Double, dimension: Int, nComponents: Int, learningRate: Double,
+                               perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
                                finalMomentum: Double):
@@ -88,7 +88,7 @@ object Tsne {
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    val initialWorkingSet = initWorkingSet(centeredInput, dimension, randomState)
+    val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
 
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
       initialMomentum, finalMomentum)

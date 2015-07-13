@@ -33,7 +33,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val neighbors = 2
     val metric = SquaredEuclideanDistanceMetric()
 
-    val input = env.fromCollection(TsneHelpersTestSuite.inputDense)
+    val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
 
     val results = kNearestNeighbors(input, neighbors, metric).collect()
     val expectedResults = TsneHelpersTestSuite.knnResults
@@ -44,22 +44,24 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
   "pairwiseAffinities" should "return the pairwise similarity p_i|j between datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
 
     val perplexity = 2.0
     val neighbors = 10
     val metric = SquaredEuclideanDistanceMetric()
 
-    val input = env.fromCollection(TsneHelpersTestSuite.inputDense)
+    val input = TsneHelpersTestSuite
+      .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
 
     val knn = kNearestNeighbors(input, neighbors, metric)
     val results = pairwiseAffinities(knn, perplexity).collect()
-    val expectedResults = TsneHelpersTestSuite.pairwiseAffinitiesResults
+    val expectedResults = TsneHelpersTestSuite.densePairwiseAffinitiesResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-5)
+        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
         case None => fail("expected result not found")
       }
     }
@@ -68,9 +70,9 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
   "jointProbabilities" should "return the symmetrized probability distribution p_ij over the datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val pairwiseAffinities = env.fromCollection(TsneHelpersTestSuite.pairwiseAffinitiesResults)
+    val pairwiseAffinities = env.fromCollection(TsneHelpersTestSuite.densePairwiseAffinitiesResults)
     val results = jointDistribution(pairwiseAffinities).collect()
-    val expectedResults = TsneHelpersTestSuite.jointProbabilitiesResults
+    val expectedResults = TsneHelpersTestSuite.denseJointProbabilitiesResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
@@ -86,9 +88,9 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
   "jointProbabilities" should "return the sparse symmetrized probability distribution p_ij over the datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val pairwiseAffinities = env.fromCollection(TsneHelpersTestSuite.pairwiseAffinitiesResultsSparse)
+    val pairwiseAffinities = env.fromCollection(TsneHelpersTestSuite.sparsePairwiseAffinitiesResults)
     val results = jointDistribution(pairwiseAffinities).collect()
-    val expectedResults = TsneHelpersTestSuite.jointProbabilitiesResultsSparse
+    val expectedResults = TsneHelpersTestSuite.sparseJointProbabilitiesResults
     
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
@@ -114,39 +116,53 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
         case _ => fail("expected result not found")
       }
     }
   }
 
-  "Q" should "return the Q" in {
+  "lowDimAffinities" should "return the unnormalized low dim distribution Q" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val y = env.fromCollection(TsneHelpersTestSuite.yInit)
-    val DD = computeDistances(y, SquaredEuclideanDistanceMetric())
+    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
+    val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
 
-    val results = computeLowDimAffinities(DD).q.collect()
+    val results = computeLowDimAffinities(distances).q.collect()
     
-    val expectedResults = TsneHelpersTestSuite.QDense
+    val expectedResults = TsneHelpersTestSuite.denseUnnormLowDimAffinitiesResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
         case _ => fail("expected result not found")
       }
     }
   }
 
+  "lowDimAffinities" should "return the sum over Q" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
+    val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
+
+    val results = computeLowDimAffinities(distances).sumQ.collect()
+
+    val expectedResult = TsneHelpersTestSuite.denseSumQ
+
+    results.size should equal (1)
+    results(0) should equal (expectedResult +- 1e-12)
+  }
+
   "centerEmbedding" should "compute the centered embedding as LabeledVectors" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val embedding = env.fromCollection(TsneHelpersTestSuite.embedding)
+    val embedding = env.fromCollection(TsneHelpersTestSuite.centeringInput)
     val results = centerEmbedding(embedding).collect()
 
-    val expectedResults = TsneHelpersTestSuite.centeredEmbedding
+    val expectedResults = TsneHelpersTestSuite.centeringResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
@@ -158,57 +174,48 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     }
   }
 
-
-  "PQ" should "return the pq" in {
-    val env = ExecutionEnvironment.getExecutionEnvironment
-
-    val P = env.fromCollection(TsneHelpersTestSuite.Ppython)
-    val num = env.fromCollection(TsneHelpersTestSuite.Qpython)
-
-    val sumNum = env.fromCollection(List(41.7192239804))
-    
-    val results = calcPQ_unittest(num,P,sumNum).collect()
-
-
-    val expectedRes = TsneHelpersTestSuite.PQpython
-
-    results.size should equal (expectedRes.size)
-    for (expected <- expectedRes) {
-      val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
-      result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
-        case _ => fail("expected result not found")
-      }
-    }
-
-    
-  }
-
   "Gradient" should "return the gradient" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val P = env.fromCollection(TsneHelpersTestSuite.Ppython)
-    val y = env.fromCollection(TsneHelpersTestSuite.yPython)
-    val DD = computeDistances(y, SquaredEuclideanDistanceMetric())
-    val r = computeLowDimAffinities(DD)
-    
-    val num = r.q.collect()
-    
-    val expectedNum = TsneHelpersTestSuite.Qpython
+    val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
+    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
+    val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
+    val r = computeLowDimAffinities(distances)
 
-    num.size should equal (expectedNum.size)
-    for (expected <- expectedNum) {
-      val result = num.find(x => x._1 == expected._1 && x._2 == expected._2)
+    val results = gradient(r.q, jointDistribution, r.sumQ, distances).collect()
+
+    val expectedResults = TsneHelpersTestSuite.denseGradientResults
+    
+    results.size should equal (expectedResults.size)
+    for (expected <- expectedResults) {
+      val result = results.find(x => x.label == expected.label)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case Some(result) => {
+          for (i <- 0 until result.vector.size){
+            result.vector(i) should equal (expected.vector(i) +- 1e-12)
+          }
+        }
         case _ => fail("expected result not found")
       }
     }
+  }
 
-    val results = gradient(r.q, P, r.sumQ, DD).collect()
+  /*"enrichGradient" should "return the gradient with momentum and gain" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val expectedResults = TsneHelpersTestSuite.gradientPython
-    
+    val minGain = 0.01
+    val momentum = 0.5
+    val learningRate = 300
+
+    val gradient = env.fromCollection(TsneHelpersTestSuite.denseGradientResults)
+
+    val workingSet =
+
+    val results = enrichGradientByMomentumAndGain(gradient, workingSet, minGain, momentum, learningRate)
+      .map(x => LabeledVector(x._1, x._2)).collect()
+
+    val expectedResults = TsneHelpersTestSuite.gradientWithMomentumAndGainResults
+
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x.label == expected.label)
@@ -221,11 +228,11 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
         case _ => fail("expected result not found")
       }
     }
-  }
+  }*/
 }
 
 object TsneHelpersTestSuite {
-  val inputDense: Seq[LabeledVector] = List(
+  val knnInput: Seq[LabeledVector] = List(
     LabeledVector(0.0, SparseVector.fromCOO(4, List((0, 0.0),(1, 0.0),(2, 0.0),(3, 0.0)))),
     LabeledVector(1.0, SparseVector.fromCOO(4, List((0, 1.0),(1, 1.0),(2, 1.0),(3, 1.0)))),
     LabeledVector(2.0, SparseVector.fromCOO(4, List((0, 2.0),(1, 2.0),(2, 2.0),(3, 2.0)))),
@@ -244,64 +251,102 @@ object TsneHelpersTestSuite {
     (6L, 7L, 4.0), (6L, 5L, 4.0), (7L, 8L, 4.0), (7L, 6L, 4.0), (8L, 7L, 4.0), (8L, 6L, 16.0)
   ).toSeq
 
-  // calculated by Van der Maaten Python implementation
-  val pairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 0.733896425817), (0L, 2L, 0.230388739954), (0L, 3L, 0.0334070949154),
-    (0L, 4L, 0.00223752119073), (0L, 5L, 6.92223896587e-05), (0L, 6L, 9.89183817531e-07),
-    (0L, 7L, 6.52917640895e-09), (0L, 8L, 1.99063111076e-11), (1L, 0L, 0.499999999991),
-    (1L, 2L, 0.499999999991), (1L, 3L, 1.8875672721e-11), (1L, 4L, 8.01905445259e-29),
-    (1L, 5L, 3.83382403679e-53), (1L, 6L, 2.06266870227e-84), (1L, 7L, 1.24886378343e-122),
-    (1L, 8L, 8.5092043508e-168), (2L, 0L, 1.88756727207e-11), (2L, 1L, 0.499999999981),
-    (2L, 3L, 0.499999999981), (2L, 4L, 1.88756727207e-11), (2L, 5L, 8.01905445244e-29),
-    (2L, 6L, 3.83382403672e-53), (2L, 7L, 2.06266870223e-84), (2L, 8L, 1.24886378341e-122),
-    (3L, 0L, 8.01905445244e-29), (3L, 1L, 1.88756727207e-11), (3L, 2L, 0.499999999981),
-    (3L, 4L, 0.499999999981), (3L, 5L, 1.88756727207e-11), (3L, 6L, 8.01905445244e-29),
-    (3L, 7L, 3.83382403672e-53), (3L, 8L, 2.06266870223e-84), (4L, 0L, 3.83382403672e-53),
-    (4L, 1L, 8.01905445244e-29), (4L, 2L, 1.88756727207e-11), (4L, 3L, 0.499999999981),
-    (4L, 5L, 0.499999999981), (4L, 6L, 1.88756727207e-11), (4L, 7L, 8.01905445244e-29),
-    (4L, 8L, 3.83382403672e-53), (5L, 0L, 2.06266870223e-84), (5L, 1L, 3.83382403672e-53),
-    (5L, 2L, 8.01905445244e-29), (5L, 3L, 1.88756727207e-11), (5L, 4L, 0.499999999981),
-    (5L, 6L, 0.499999999981), (5L, 7L, 1.88756727207e-11), (5L, 8L, 8.01905445244e-29),
-    (6L, 0L, 1.24886378341e-122), (6L, 1L, 2.06266870223e-84), (6L, 2L, 3.83382403672e-53),
-    (6L, 3L, 8.01905445244e-29), (6L, 4L, 1.88756727207e-11), (6L, 5L, 0.499999999981),
-    (6L, 7L, 0.499999999981), (6L, 8L, 1.88756727207e-11), (7L, 0L, 8.5092043508e-168),
-    (7L, 1L, 1.24886378343e-122), (7L, 2L, 2.06266870227e-84), (7L, 3L, 3.83382403679e-53),
-    (7L, 4L, 8.01905445259e-29), (7L, 5L, 1.8875672721e-11), (7L, 6L, 0.499999999991),
-    (7L, 8L, 0.499999999991), (8L, 0L, 1.99063111076e-11), (8L, 1L, 6.52917640895e-09),
-    (8L, 2L, 9.89183817531e-07), (8L, 3L, 6.92223896587e-05), (8L, 4L, 0.00223752119073),
-    (8L, 5L, 0.0334070949154), (8L, 6L, 0.230388739954), (8L, 7L, 0.733896425817)
+  // Python implementation van der Maaten, perplexity: 2.0, nComponents: 2, earlyExaggeration:
+
+  val densePairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
+    (0L, 1L, 2.370974987703e-02), (0L, 2L, 5.153826240184e-05), (0L, 3L, 1.945495759780e-02), (0L, 4L, 8.216433537309e-04), (0L, 5L, 4.872518553230e-03), (0L, 6L, 7.036533081247e-02), (0L, 7L, 8.338103510412e-01), (0L, 8L, 4.291578136374e-02), (0L, 9L, 3.998129138403e-03), (1L, 0L, 7.724806516559e-01), (1L, 2L, 1.365877675224e-09), (1L, 3L, 3.248251955497e-05), (1L, 4L, 5.336682282239e-04), (1L, 5L, 1.440504524837e-01), (1L, 6L, 1.402694896096e-05), (1L, 7L, 8.229819286616e-02), (1L, 8L, 5.685570334838e-05), (1L, 9L, 5.336682282239e-04), (2L, 0L, 1.898500331402e-03), (2L, 1L, 8.687658519724e-04), (2L, 3L, 5.062254851994e-02), (2L, 4L, 1.449209955883e-02), (2L, 5L, 3.548272991202e-03), (2L, 6L, 2.928791467503e-02), (2L, 7L, 3.166935688445e-02), (2L, 8L, 2.316520085169e-02), (2L, 9L, 8.444473403355e-01), (3L, 0L, 2.390453996554e-04), (3L, 1L, 1.395251795149e-08), (3L, 2L, 1.371014800172e-06), (3L, 4L, 2.369600685486e-03), (3L, 5L, 1.347198827355e-04), (3L, 6L, 3.128918783462e-02), (3L, 7L, 2.411490824021e-05), (3L, 8L, 7.330981240389e-01), (3L, 9L, 2.328438222830e-01), (4L, 0L, 1.019336232626e-04), (4L, 1L, 2.549661856719e-04), (4L, 2L, 8.105432254715e-05), (4L, 3L, 9.980288326134e-03), (4L, 5L, 5.017868132870e-03), (4L, 6L, 1.751495817431e-01), (4L, 7L, 1.008626268887e-03), (4L, 8L, 7.770114760492e-01), (4L, 9L, 3.139420534839e-02), (5L, 0L, 9.336380191993e-06), (5L, 1L, 1.005438326603e-03), (5L, 2L, 1.769727010776e-13), (5L, 3L, 2.563249124685e-03), (5L, 4L, 1.665948534565e-02), (5L, 6L, 1.977751128205e-10), (5L, 7L, 2.760372711471e-01), (5L, 8L, 1.333923297742e-08), (5L, 9L, 7.037252061386e-01), (6L, 0L, 2.657830365339e-02), (6L, 1L, 4.705122579295e-03), (6L, 2L, 7.129194416069e-03), (6L, 3L, 3.052697452006e-02), (6L, 4L, 5.312632631673e-02), (6L, 5L, 4.705122579295e-03), (6L, 7L, 8.775567604535e-03), (6L, 8L, 8.480859960929e-01), (6L, 9L, 1.636739223770e-02), (7L, 0L, 8.439216060511e-01), (7L, 1L, 2.173031429002e-02), (7L, 2L, 4.863220572021e-03), (7L, 3L, 1.840043131472e-02), (7L, 4L, 1.319325614475e-02), (7L, 5L, 6.961968258558e-02), (7L, 6L, 7.370873853279e-03), (7L, 8L, 2.500183873820e-03), (7L, 9L, 1.840043131472e-02), (8L, 0L, 1.718948684906e-02), (8L, 1L, 3.907353474692e-03), (8L, 2L, 4.531278151932e-03), (8L, 3L, 3.605396373725e-02), (8L, 4L, 7.022214844512e-02), (8L, 5L, 4.531278151932e-03), (8L, 6L, 8.397228403177e-01), (8L, 7L, 3.907353474692e-03), (8L, 9L, 1.993429739760e-02), (9L, 0L, 4.341453089465e-07), (9L, 1L, 2.423850003604e-08), (9L, 2L, 9.192527632300e-02), (9L, 3L, 8.003537295921e-01), (9L, 4L, 9.192527632300e-02), (9L, 5L, 5.132223630089e-03), (9L, 6L, 9.710748028923e-05), (9L, 7L, 7.776147410114e-06), (9L, 8L, 1.055815212027e-02)
   ).toSeq
 
-  // calculated by Van der Maaten Python implementation
-  val jointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 0.0685498014338), (0L, 2L, 0.0127993744429), (0L, 3L, 0.00185594971752),
-    (0L, 4L, 0.000124306732818), (0L, 5L, 3.84568831437e-06), (0L, 6L, 5.49546565295e-08),
-    (0L, 7L, 3.6273202272e-10), (0L, 8L, 2.21181234528e-12), (1L, 0L, 0.0685498014338),
-    (1L, 2L, 0.055555555554), (1L, 3L, 2.09729696898e-12), (1L, 4L, 8.9100605028e-30),
-    (1L, 5L, 4.25980448528e-54), (1L, 6L, 2.29185411361e-85), (1L, 7L, 1.38762642604e-123),
-    (1L, 8L, 3.6273202272e-10), (2L, 0L, 0.0127993744429), (2L, 1L, 0.055555555554),
-    (2L, 3L, 0.0555555555535), (2L, 4L, 2.09729696896e-12), (2L, 5L, 8.91006050271e-30),
-    (2L, 6L, 4.25980448524e-54), (2L, 7L, 2.29185411361e-85), (2L, 8L, 5.49546565295e-08),
-    (3L, 0L, 0.00185594971752), (3L, 1L, 2.09729696898e-12), (3L, 2L, 0.0555555555535),
-    (3L, 4L, 0.0555555555535), (3L, 5L, 2.09729696896e-12), (3L, 6L, 8.91006050271e-30),
-    (3L, 7L, 4.25980448528e-54), (3L, 8L, 3.84568831437e-06), (4L, 0L, 0.000124306732818),
-    (4L, 1L, 8.9100605028e-30), (4L, 2L, 2.09729696896e-12), (4L, 3L, 0.0555555555535),
-    (4L, 5L, 0.0555555555535), (4L, 6L, 2.09729696896e-12), (4L, 7L, 8.9100605028e-30),
-    (4L, 8L, 0.000124306732818), (5L, 0L, 3.84568831437e-06), (5L, 1L, 4.25980448528e-54),
-    (5L, 2L, 8.91006050271e-30), (5L, 3L, 2.09729696896e-12), (5L, 4L, 0.0555555555535),
-    (5L, 6L, 0.0555555555535), (5L, 7L, 2.09729696898e-12), (5L, 8L, 0.00185594971752),
-    (6L, 0L, 5.49546565295e-08), (6L, 1L, 2.29185411361e-85), (6L, 2L, 4.25980448524e-54),
-    (6L, 3L, 8.91006050271e-30), (6L, 4L, 2.09729696896e-12), (6L, 5L, 0.0555555555535),
-    (6L, 7L, 0.055555555554), (6L, 8L, 0.0127993744429), (7L, 0L, 3.6273202272e-10),
-    (7L, 1L, 1.38762642604e-123), (7L, 2L, 2.29185411361e-85), (7L, 3L, 4.25980448528e-54),
-    (7L, 4L, 8.9100605028e-30), (7L, 5L, 2.09729696898e-12), (7L, 6L, 0.055555555554),
-    (7L, 8L, 0.0685498014338), (8L, 0L, 2.21181234528e-12), (8L, 1L, 3.6273202272e-10),
-    (8L, 2L, 5.49546565295e-08), (8L, 3L, 3.84568831437e-06), (8L, 4L, 0.000124306732818),
-    (8L, 5L, 0.00185594971752), (8L, 6L, 0.0127993744429), (8L, 7L, 0.0685498014338)
+  val denseJointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
+    (0L, 1L, 3.980952007665e-02), (0L, 2L, 9.750192969019e-05), (0L, 3L, 9.847001498727e-04), (0L, 4L, 4.617884884968e-05), (0L, 5L, 2.440927466711e-04), (0L, 6L, 4.847181723293e-03), (0L, 7L, 8.388659785461e-02), (0L, 8L, 3.005263410640e-03), (0L, 9L, 1.999281641856e-04), (1L, 0L, 3.980952007665e-02), (1L, 2L, 4.343836089250e-05), (1L, 3L, 1.624823603646e-06), (1L, 4L, 3.943172069479e-05), (1L, 5L, 7.252794540517e-03), (1L, 6L, 2.359574764128e-04), (1L, 7L, 5.201425357809e-03), (1L, 8L, 1.982104589020e-04), (1L, 9L, 2.668462333619e-05), (2L, 0L, 9.750192969019e-05), (2L, 1L, 4.343836089250e-05), (2L, 3L, 2.531195976737e-03), (2L, 4L, 7.286576940686e-04), (2L, 5L, 1.774136495689e-04), (2L, 6L, 1.820855454555e-03), (2L, 7L, 1.826628872824e-03), (2L, 8L, 1.384823950181e-03), (2L, 9L, 4.681863083292e-02), (3L, 0L, 9.847001498727e-04), (3L, 1L, 1.624823603646e-06), (3L, 2L, 2.531195976737e-03), (3L, 4L, 6.174944505810e-04), (3L, 5L, 1.348984503710e-04), (3L, 6L, 3.090808117734e-03), (3L, 7L, 9.212273111480e-04), (3L, 8L, 3.845760438881e-02), (3L, 9L, 5.165987759376e-02), (4L, 0L, 4.617884884968e-05), (4L, 1L, 3.943172069479e-05), (4L, 2L, 7.286576940686e-04), (4L, 3L, 6.174944505810e-04), (4L, 5L, 1.083867673926e-03), (4L, 6L, 1.141379540299e-02), (4L, 7L, 7.100941206818e-04), (4L, 8L, 4.236168122471e-02), (4L, 9L, 6.165974083570e-03), (5L, 0L, 2.440927466711e-04), (5L, 1L, 7.252794540517e-03), (5L, 2L, 1.774136495689e-04), (5L, 3L, 1.348984503710e-04), (5L, 4L, 1.083867673926e-03), (5L, 6L, 2.352561388535e-04), (5L, 7L, 1.728284768663e-02), (5L, 8L, 2.265645745583e-04), (5L, 9L, 3.544287148844e-02), (6L, 0L, 4.847181723293e-03), (6L, 1L, 2.359574764128e-04), (6L, 2L, 1.820855454555e-03), (6L, 3L, 3.090808117734e-03), (6L, 4L, 1.141379540299e-02), (6L, 5L, 2.352561388535e-04), (6L, 7L, 8.073220728907e-04), (6L, 8L, 8.439044182053e-02), (6L, 9L, 8.232249858994e-04), (7L, 0L, 8.388659785461e-02), (7L, 1L, 5.201425357809e-03), (7L, 2L, 1.826628872824e-03), (7L, 3L, 9.212273111480e-04), (7L, 4L, 7.100941206818e-04), (7L, 5L, 1.728284768663e-02), (7L, 6L, 8.073220728907e-04), (7L, 8L, 3.203768674256e-04), (7L, 9L, 9.204103731065e-04), (8L, 0L, 3.005263410640e-03), (8L, 1L, 1.982104589020e-04), (8L, 2L, 1.384823950181e-03), (8L, 3L, 3.845760438881e-02), (8L, 4L, 4.236168122471e-02), (8L, 5L, 2.265645745583e-04), (8L, 6L, 8.439044182053e-02), (8L, 7L, 3.203768674256e-04), (8L, 9L, 1.524622475894e-03), (9L, 0L, 1.999281641856e-04), (9L, 1L, 2.668462333619e-05), (9L, 2L, 4.681863083292e-02), (9L, 3L, 5.165987759376e-02), (9L, 4L, 6.165974083570e-03), (9L, 5L, 3.544287148844e-02), (9L, 6L, 8.232249858994e-04), (9L, 7L, 9.204103731065e-04), (9L, 8L, 1.524622475894e-03)
   ).toSeq
 
-  //calculated by c++ program
-  val pairwiseAffinitiesResultsSparse: Seq[(Long, Long, Double)] = List(
+  val denseSumQ = 3.365625463923e+01
+
+  val denseUnnormLowDimAffinitiesResults: Seq[(Long, Long, Double)] = List(
+    (0L, 1L, 1.997990966178e-01), (0L, 2L, 3.438741251510e-01), (0L, 3L, 5.084645547121e-01), (0L, 4L, 2.228754579760e-01), (0L, 5L, 2.111669473429e-01), (0L, 6L, 4.799407190805e-01), (0L, 7L, 3.639911864625e-01), (0L, 8L, 6.947858598830e-01), (0L, 9L, 2.137434062812e-01), (1L, 0L, 1.997990966178e-01), (1L, 2L, 8.232738803226e-02), (1L, 3L, 1.487280153275e-01), (1L, 4L, 1.811394269082e-01), (1L, 5L, 4.318749070054e-01), (1L, 6L, 1.805549827630e-01), (1L, 7L, 2.031044587733e-01), (1L, 8L, 1.379549302261e-01), (1L, 9L, 9.072703100166e-02), (2L, 0L, 3.438741251510e-01), (2L, 1L, 8.232738803226e-02), (2L, 3L, 3.962129377163e-01), (2L, 4L, 1.468393804551e-01), (2L, 5L, 1.011844233815e-01), (2L, 6L, 2.913681119953e-01), (2L, 7L, 2.107258420207e-01), (2L, 8L, 5.761512990942e-01), (2L, 9L, 2.914080750559e-01), (3L, 0L, 5.084645547121e-01), (3L, 1L, 1.487280153275e-01), (3L, 2L, 3.962129377163e-01), (3L, 4L, 4.123285538511e-01), (3L, 5L, 2.365319708095e-01), (3L, 6L, 9.006682201122e-01), (3L, 7L, 6.704571955142e-01), (3L, 8L, 7.699293990309e-01), (3L, 9L, 5.264164083150e-01), (4L, 0L, 2.228754579760e-01), (4L, 1L, 1.811394269082e-01), (4L, 2L, 1.468393804551e-01), (4L, 3L, 4.123285538511e-01), (4L, 5L, 4.650305789265e-01), (4L, 6L, 5.463238327253e-01), (4L, 7L, 7.661566330118e-01), (4L, 8L, 2.544194531822e-01), (4L, 9L, 3.606532994232e-01), (5L, 0L, 2.111669473429e-01), (5L, 1L, 4.318749070054e-01), (5L, 2L, 1.011844233815e-01), (5L, 3L, 2.365319708095e-01), (5L, 4L, 4.650305789265e-01), (5L, 6L, 3.168065370999e-01), (5L, 7L, 4.263239066536e-01), (5L, 8L, 1.793300697535e-01), (5L, 9L, 1.573034975607e-01), (6L, 0L, 4.799407190805e-01), (6L, 1L, 1.805549827630e-01), (6L, 2L, 2.913681119953e-01), (6L, 3L, 9.006682201122e-01), (6L, 4L, 5.463238327253e-01), (6L, 5L, 3.168065370999e-01), (6L, 7L, 8.729481827509e-01), (6L, 8L, 6.082097572678e-01), (6L, 9L, 4.645101020686e-01), (7L, 0L, 3.639911864625e-01), (7L, 1L, 2.031044587733e-01), (7L, 2L, 2.107258420207e-01), (7L, 3L, 6.704571955142e-01), (7L, 4L, 7.661566330118e-01), (7L, 5L, 4.263239066536e-01), (7L, 6L, 8.729481827509e-01), (7L, 8L, 4.178341871825e-01), (7L, 9L, 4.118776956674e-01), (8L, 0L, 6.947858598830e-01), (8L, 1L, 1.379549302261e-01), (8L, 2L, 5.761512990942e-01), (8L, 3L, 7.699293990309e-01), (8L, 4L, 2.544194531822e-01), (8L, 5L, 1.793300697535e-01), (8L, 6L, 6.082097572678e-01), (8L, 7L, 4.178341871825e-01), (8L, 9L, 3.551252754453e-01), (9L, 0L, 2.137434062812e-01), (9L, 1L, 9.072703100166e-02), (9L, 2L, 2.914080750559e-01), (9L, 3L, 5.264164083150e-01), (9L, 4L, 3.606532994232e-01), (9L, 5L, 1.573034975607e-01), (9L, 6L, 4.645101020686e-01), (9L, 7L, 4.118776956674e-01), (9L, 8L, 3.551252754453e-01)
+  ).toSeq
+
+  val initialEmbedding: Seq[LabeledVector] = List(
+    LabeledVector(0.0, DenseVector(1.764052345968e+00, 4.001572083672e-01)),
+    LabeledVector(1.0, DenseVector(9.787379841057e-01, 2.240893199201e+00)),
+    LabeledVector(2.0, DenseVector(1.867557990150e+00, -9.772778798764e-01)),
+    LabeledVector(3.0, DenseVector(9.500884175256e-01, -1.513572082977e-01)),
+    LabeledVector(4.0, DenseVector(-1.032188517936e-01, 4.105985019384e-01)),
+    LabeledVector(5.0, DenseVector(1.440435711609e-01, 1.454273506963e+00)),
+    LabeledVector(6.0, DenseVector(7.610377251470e-01, 1.216750164928e-01)),
+    LabeledVector(7.0, DenseVector(4.438632327454e-01, 3.336743273743e-01)),
+    LabeledVector(8.0, DenseVector(1.494079073158e+00, -2.051582637658e-01)),
+    LabeledVector(9.0, DenseVector(3.130677016509e-01, -8.540957393017e-01))
+  ).toSeq
+
+  val denseGradientResults: Seq[LabeledVector] = List(
+    LabeledVector(0.0, DenseVector(2.039671351114e-02, -2.841077532513e-02)),
+    LabeledVector(1.0, DenseVector(-8.392113494907e-03, 2.231906609600e-03)),
+    LabeledVector(2.0, DenseVector(4.925836551601e-03, 1.893423603195e-02)),
+    LabeledVector(3.0, DenseVector(-2.069923187117e-03, 3.379074534054e-02)),
+    LabeledVector(4.0, DenseVector(9.411374074020e-03, 5.816153185684e-03)),
+    LabeledVector(5.0, DenseVector(6.038471365385e-03, -9.556999264301e-04)),
+    LabeledVector(6.0, DenseVector(-3.232836693981e-02, 1.179730064230e-02)),
+    LabeledVector(7.0, DenseVector(-2.424283588089e-02, -2.266466720419e-02)),
+    LabeledVector(8.0, DenseVector(4.632554267724e-02, -1.538485019566e-02)),
+    LabeledVector(9.0, DenseVector(-2.006469867665e-02, -5.154349158673e-03))
+  ).toSeq
+
+  val gradientWithMomentumAndGainResults: Seq[LabeledVector] = List(
+    LabeledVector(0.0, DenseVector(-7.342816864009e+00, 6.818586078031e+00)),
+    LabeledVector(1.0, DenseVector(2.014107238778e+00, -8.034863794560e-01)),
+    LabeledVector(2.0, DenseVector(-1.773301158576e+00, -6.816324971503e+00)),
+    LabeledVector(3.0, DenseVector(4.967815649080e-01, -1.216466832260e+01)),
+    LabeledVector(4.0, DenseVector(-3.388094666647e+00, -2.093815146846e+00)),
+    LabeledVector(5.0, DenseVector(-2.173849691539e+00, 2.293679823432e-01)),
+    LabeledVector(6.0, DenseVector(7.758808065556e+00, -4.247028231228e+00)),
+    LabeledVector(7.0, DenseVector(5.818280611414e+00, 5.439520129006e+00)),
+    LabeledVector(8.0, DenseVector(-1.667719536380e+01, 3.692364046958e+00)),
+    LabeledVector(9.0, DenseVector(4.815527682396e+00, 1.237043798081e+00))
+  ).toSeq
+
+  val updatedGainsResults: Seq[LabeledVector] = List(
+    LabeledVector(0.0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
+    LabeledVector(1.0, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
+    LabeledVector(2.0, DenseVector(1.200000000000e+00, 1.200000000000e+00)),
+    LabeledVector(3.0, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
+    LabeledVector(4.0, DenseVector(1.200000000000e+00, 1.200000000000e+00)),
+    LabeledVector(5.0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
+    LabeledVector(6.0, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
+    LabeledVector(7.0, DenseVector(8.000000000000e-01, 8.000000000000e-01)),
+    LabeledVector(8.0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
+    LabeledVector(9.0, DenseVector(8.000000000000e-01, 8.000000000000e-01))
+  ).toSeq
+
+  val updatedEmbeddingResults: Seq[LabeledVector] = List(
+    LabeledVector(0.0, DenseVector(-5.578764518042e+00, 7.218743286398e+00)),
+    LabeledVector(1.0, DenseVector(2.992845222883e+00, 1.437406819745e+00)),
+    LabeledVector(2.0, DenseVector(9.425683157355e-02, -7.793602851380e+00)),
+    LabeledVector(3.0, DenseVector(1.446869982434e+00, -1.231602553089e+01)),
+    LabeledVector(4.0, DenseVector(-3.491313518441e+00, -1.683216644908e+00)),
+    LabeledVector(5.0, DenseVector(-2.029806120378e+00, 1.683641489306e+00)),
+    LabeledVector(6.0, DenseVector(8.519845790703e+00, -4.125353214736e+00)),
+    LabeledVector(7.0, DenseVector(6.262143844159e+00, 5.773194456381e+00)),
+    LabeledVector(8.0, DenseVector(-1.518311629065e+01, 3.487205783192e+00)),
+    LabeledVector(9.0, DenseVector(5.128595384047e+00, 3.829480587797e-01))
+  ).toSeq
+
+  val centeringInput: Seq[LabeledVector] = List(
+    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, -2.0),(1, 4.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -6.0),(1, 4.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 2.0),(1, -8.0))))
+  ).toSeq
+
+  val centeringResults: Seq[LabeledVector] = List(
+    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, 0.0),(1, 4.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -4.0),(1, 4.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 4.0),(1, -8.0))))
+  ).toSeq
+
+  // C++ implementation
+
+  val sparsePairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
     (0L, 5L, 0.999490),(0L, 4L, 0.000000),(1L, 5L, 0.999490),(1L, 6L, 0.000000),
     (2L, 3L, 0.999490),(2L, 4L, 0.000000),(3L, 4L, 0.499252),(3L, 2L, 0.499252),
     (4L, 3L, 0.499252),(4L, 5L, 0.499252),(5L, 6L, 0.499252),(5L, 4L, 0.499252),
@@ -310,8 +355,7 @@ object TsneHelpersTestSuite {
     (10L, 11L, 0.999490),(10L, 8L, 0.000000),(11L, 10L, 0.999490),(11L, 8L, 0.000000)
   ).toSeq
 
-  //calculated by c++ program
-  val jointProbabilitiesResultsSparse: Seq[(Long, Long, Double)] = List(
+  val sparseJointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
     (0L, 5L, 0.041680),(0L, 4L, 0.000000),(1L, 5L, 0.041680),(1L, 6L, 0.000000),
     (2L, 3L, 0.062500),(2L, 4L, 0.000000),(3L, 2L, 0.062500),(3L, 4L, 0.041639),
     (4L, 0L, 0.000000),(4L, 2L, 0.000000),(4L, 3L, 0.041639),(4L, 5L, 0.041639),
@@ -322,19 +366,18 @@ object TsneHelpersTestSuite {
     (10L, 11L, 0.083361),(10L, 8L, 0.000000),(11L, 10L, 0.083361),(11L, 8L, 0.000000)
   )
 
-  //calculated by c++ program
   val yInit: Seq[LabeledVector] = List(
-    LabeledVector(0, new DenseVector(Array(0.00011122716070838681,0.00006080563805333057))), 
-    LabeledVector(1, new DenseVector(Array(-0.00007120823209735604,-0.00017189452155069314))), 
-    LabeledVector(2, new DenseVector(Array(-0.00004000535669646060,-0.00022717203149772645))), 
-    LabeledVector(3, new DenseVector(Array(0.00008663309627528085,-0.00010325765463991235))), 
-    LabeledVector(4, new DenseVector(Array(-0.00003582032920213515,-0.00011138115570423478))), 
-    LabeledVector(5, new DenseVector(Array(0.00000474475662365405,0.00008448473882524468))), 
-    LabeledVector(6, new DenseVector(Array(0.00022241394002237897,-0.00000064174153521060))), 
-    LabeledVector(7, new DenseVector(Array(-0.00007498357621804678,0.00001542291223429679))), 
-    LabeledVector(8, new DenseVector(Array(-0.00002279772806102704,-0.00013284059681958318))), 
-    LabeledVector(9, new DenseVector(Array(0.00000541931482402651,-0.00010620372323138086))), 
-    LabeledVector(10, new DenseVector(Array(0.00007868893550591110,-0.00000695497272360187))), 
+    LabeledVector(0, new DenseVector(Array(0.00011122716070838681,0.00006080563805333057))),
+    LabeledVector(1, new DenseVector(Array(-0.00007120823209735604,-0.00017189452155069314))),
+    LabeledVector(2, new DenseVector(Array(-0.00004000535669646060,-0.00022717203149772645))),
+    LabeledVector(3, new DenseVector(Array(0.00008663309627528085,-0.00010325765463991235))),
+    LabeledVector(4, new DenseVector(Array(-0.00003582032920213515,-0.00011138115570423478))),
+    LabeledVector(5, new DenseVector(Array(0.00000474475662365405,0.00008448473882524468))),
+    LabeledVector(6, new DenseVector(Array(0.00022241394002237897,-0.00000064174153521060))),
+    LabeledVector(7, new DenseVector(Array(-0.00007498357621804678,0.00001542291223429679))),
+    LabeledVector(8, new DenseVector(Array(-0.00002279772806102704,-0.00013284059681958318))),
+    LabeledVector(9, new DenseVector(Array(0.00000541931482402651,-0.00010620372323138086))),
+    LabeledVector(10, new DenseVector(Array(0.00007868893550591110,-0.00000695497272360187))),
     LabeledVector(11, new DenseVector(Array(-0.00017049612819062857,-0.00006410186066559613)))
   )
 
@@ -474,737 +517,14 @@ object TsneHelpersTestSuite {
     (11L, 10L, 0.00000006535896277090)
   )
 
-  //calculated by Python
-  val QDense: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 0.99999991256797093886),
-    (0L, 2L, 0.99999989419759882647),
-    (0L, 3L, 0.99999997247836869274),
-    (0L, 4L, 0.99999994872874653495),
-    (0L, 5L, 0.99999998810079782086),
-    (0L, 6L, 0.99999998386171995435),
-    (0L, 7L, 0.99999996326597107021),
-    (0L, 8L, 0.99999994453846796638),
-    (0L, 9L, 0.99999996091257448150),
-    (0L, 10L, 0.99999999434976349910),
-    (0L, 11L, 0.99999990503011415566),
-    (1L, 0L, 0.99999991256797093886),
-    (1L, 2L, 0.99999999597077748881),
-    (1L, 3L, 0.99999997037509635867),
-    (1L, 4L, 0.99999999508582892993),
-    (1L, 5L, 0.99999992850082342066),
-    (1L, 6L, 0.99999988445851872854),
-    (1L, 7L, 0.99999996489792708498),
-    (1L, 8L, 0.99999999613121404174),
-    (1L, 9L, 0.99999998981293825029),
-    (1L, 10L, 0.99999995032578681275),
-    (1L, 11L, 0.99999997852265631870),
-    (2L, 0L, 0.99999989419759882647),
-    (2L, 1L, 0.99999999597077748881),
-    (2L, 3L, 0.99999996860793050057),
-    (2L, 4L, 0.99999998657495892118),
-    (2L, 5L, 0.99999990086749479534),
-    (2L, 6L, 0.99999987982015481336),
-    (2L, 7L, 0.99999993992422109290),
-    (2L, 8L, 0.99999999080547807839),
-    (2L, 9L, 0.99999998330326789198),
-    (2L, 10L, 0.99999993741611581388),
-    (2L, 11L, 0.99999995638027983080),
-    (3L, 0L, 0.99999997247836869274),
-    (3L, 1L, 0.99999997037509635867),
-    (3L, 2L, 0.99999996860793050057),
-    (3L, 4L, 0.99999998493916764097),
-    (3L, 5L, 0.99999995804709529423),
-    (3L, 6L, 0.99999997103353766015),
-    (3L, 7L, 0.99999995979497591225),
-    (3L, 8L, 0.99999998714974436265),
-    (3L, 9L, 0.99999999339564227263),
-    (3L, 10L, 0.99999999066268385750),
-    (3L, 11L, 0.99999993235139028602),
-    (4L, 0L, 0.99999994872874653495),
-    (4L, 1L, 0.99999999508582892993),
-    (4L, 2L, 0.99999998657495892118),
-    (4L, 3L, 0.99999998493916764097),
-    (4L, 5L, 0.99999995999102675448),
-    (4L, 6L, 0.99999992105185064872),
-    (4L, 7L, 0.99999998238696885533),
-    (4L, 8L, 0.99999999936990424665),
-    (4L, 9L, 0.99999999827248586826),
-    (4L, 10L, 0.99999997598280121469),
-    (4L, 11L, 0.99999997962709796795),
-    (5L, 0L, 0.99999998810079782086),
-    (5L, 1L, 0.99999992850082342066),
-    (5L, 2L, 0.99999990086749479534),
-    (5L, 3L, 0.99999995804709529423),
-    (5L, 4L, 0.99999995999102675448),
-    (5L, 6L, 0.99999994537361203140),
-    (5L, 7L, 0.99999998887385721513),
-    (5L, 8L, 0.99999995201111235854),
-    (5L, 9L, 0.99999996363745680128),
-    (5L, 10L, 0.99999998617103780241),
-    (5L, 11L, 0.99999994721265761388),
-    (6L, 0L, 0.99999998386171995435),
-    (6L, 1L, 0.99999988445851872854),
-    (6L, 2L, 0.99999987982015481336),
-    (6L, 3L, 0.99999997103353766015),
-    (6L, 4L, 0.99999992105185064872),
-    (6L, 5L, 0.99999994537361203140),
-    (6L, 7L, 0.99999991129665211087),
-    (6L, 8L, 0.99999992239470647526),
-    (6L, 9L, 0.99999994177000417483),
-    (6L, 10L, 0.99999997930326656181),
-    (6L, 11L, 0.99999984159451660304),
-    (7L, 0L, 0.99999996326597107021),
-    (7L, 1L, 0.99999996489792708498),
-    (7L, 2L, 0.99999993992422109290),
-    (7L, 3L, 0.99999995979497591225),
-    (7L, 4L, 0.99999998238696885533),
-    (7L, 5L, 0.99999998887385721513),
-    (7L, 6L, 0.99999991129665211087),
-    (7L, 8L, 0.99999997529456974288),
-    (7L, 9L, 0.99999997874233703676),
-    (7L, 10L, 0.99999997588399003323),
-    (7L, 11L, 0.99999998455316307933),
-    (8L, 0L, 0.99999994453846796638),
-    (8L, 1L, 0.99999999613121404174),
-    (8L, 2L, 0.99999999080547807839),
-    (8L, 3L, 0.99999998714974436265),
-    (8L, 4L, 0.99999999936990424665),
-    (8L, 5L, 0.99999995201111235854),
-    (8L, 6L, 0.99999992239470647526),
-    (8L, 7L, 0.99999997529456974288),
-    (8L, 9L, 0.99999999849427556597),
-    (8L, 10L, 0.99999997385326744315),
-    (8L, 11L, 0.99999997346016944455),
-    (9L, 0L, 0.99999996091257448150),
-    (9L, 1L, 0.99999998981293825029),
-    (9L, 2L, 0.99999998330326789198),
-    (9L, 3L, 0.99999999339564227263),
-    (9L, 4L, 0.99999999827248586826),
-    (9L, 5L, 0.99999996363745680128),
-    (9L, 6L, 0.99999994177000417483),
-    (9L, 7L, 0.99999997874233703676),
-    (9L, 8L, 0.99999999849427556597),
-    (9L, 10L, 0.99999998478124840773),
-    (9L, 11L, 0.99999996728119122658),
-    (10L, 0L, 0.99999999434976349910),
-    (10L, 1L, 0.99999995032578681275),
-    (10L, 2L, 0.99999993741611581388),
-    (10L, 3L, 0.99999999066268385750),
-    (10L, 4L, 0.99999997598280121469),
-    (10L, 5L, 0.99999998617103780241),
-    (10L, 6L, 0.99999997930326656181),
-    (10L, 7L, 0.99999997588399003323),
-    (10L, 8L, 0.99999997385326744315),
-    (10L, 9L, 0.99999998478124840773),
-    (10L, 11L, 0.99999993464104153240),
-    (11L, 0L, 0.99999990503011415566),
-    (11L, 1L, 0.99999997852265631870),
-    (11L, 2L, 0.99999995638027983080),
-    (11L, 3L, 0.99999993235139028602),
-    (11L, 4L, 0.99999997962709796795),
-    (11L, 5L, 0.99999994721265761388),
-    (11L, 6L, 0.99999984159451660304),
-    (11L, 7L, 0.99999998455316307933),
-    (11L, 8L, 0.99999997346016944455),
-    (11L, 9L, 0.99999996728119122658),
-    (11L, 10L, 0.99999993464104153240)
-  ).toSeq
-
-  val embedding: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, -2.0),(1, 4.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -6.0),(1, 4.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 2.0),(1, -8.0))))
-  ).toSeq
-
-  val centeredEmbedding: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, 0.0),(1, 4.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -4.0),(1, 4.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 4.0),(1, -8.0))))
-  ).toSeq
-
-  //calculated by C++
-  val PDense: Seq[(Long, Long, Double)] = List(
-    (0L, 0L, 0.00011342557759599679),
-    (0L, 1L, 0.00011342557759599679),
-    (0L, 2L, 0.44442074580932766636),
-    (0L, 3L, 0.22199079419387895973),
-    (0L, 4L, 0.22199079418359468630),
-    (0L, 5L, 0.66641154000319668960),
-    (0L, 6L, 0.22199079418873823855),
-    (0L, 7L, 0.00000000000000000000),
-    (0L, 8L, 0.44442074748198723277),
-    (0L, 9L, 0.00000000000000000000),
-    (0L, 10L, 0.44442075082754178839),
-    (0L, 11L, 0.00000000000000000000),
-    (1L, 0L, 0.00000000000000000000),
-    (1L, 1L, 0.00011342557759600968),
-    (1L, 2L, 0.00011342557759599679),
-    (1L, 3L, 0.00011342557759600968),
-    (1L, 4L, 0.00000000000000000000),
-    (1L, 5L, 0.44442074580933033090),
-    (1L, 6L, 0.00000000000000000000),
-    (1L, 7L, 0.44442074413660648258),
-    (1L, 8L, 0.00000000000000000000),
-    (1L, 9L, 0.00000000000000000000),
-    (1L, 10L, 0.00000000000000000000),
-    (1L, 11L, 0.00000000000000000000),
-    (2L, 0L, 0.00000000000000000000),
-    (2L, 1L, 0.00000000000000000000),
-    (2L, 2L, 0.00011342557759731140),
-    (2L, 3L, 0.44442074580932766636),
-    (2L, 4L, 0.00011342557759599679),
-    (2L, 5L, 0.00011342557759731140),
-    (2L, 6L, 0.22199079418358211302),
-    (2L, 7L, 0.00000000000000000000),
-    (2L, 8L, 0.00000000000000000000),
-    (2L, 9L, 0.00000000000000000000),
-    (2L, 10L, 0.00000000000000000000),
-    (2L, 11L, 0.00000000000000000000),
-    (3L, 0L, 0.00000000000000000000),
-    (3L, 1L, 0.44442074580933033090),
-    (3L, 2L, 0.22199079418358211302),
-    (3L, 3L, 0.00033300429353067494),
-    (3L, 4L, 0.22199079419387895973),
-    (3L, 5L, 0.00011342557759600968),
-    (3L, 6L, 0.44442074580932766636),
-    (3L, 7L, 0.00033300429353067494),
-    (3L, 8L, 0.22199079419386630319),
-    (3L, 9L, 0.00000000000000000000),
-    (3L, 10L, 0.00000000000000000000),
-    (3L, 11L, 0.00000000000000000000),
-    (4L, 0L, 0.44442074580933033090),
-    (4L, 1L, 0.00000000000000000000),
-    (4L, 2L, 0.00000000000000000000),
-    (4L, 3L, 0.22199079419386630319),
-    (4L, 4L, 0.00033300429353065602),
-    (4L, 5L, 0.22199079418359468630),
-    (4L, 6L, 0.00000000000000000000),
-    (4L, 7L, 0.00011342557759599679),
-    (4L, 8L, 0.22199079419387895973),
-    (4L, 9L, 0.00033300429353065602),
-    (4L, 10L, 0.22199079418359468630),
-    (4L, 11L, 0.00000000000000000000),
-    (5L, 0L, 0.00000000000000000000),
-    (5L, 1L, 0.00000000000000000000),
-    (5L, 2L, 0.00000000000000000000),
-    (5L, 3L, 0.00000000000000000000),
-    (5L, 4L, 0.22199079418359468630),
-    (5L, 5L, 0.00033300429353065602),
-    (5L, 6L, 0.66641154000319668960),
-    (5L, 7L, 0.44442074580933033090),
-    (5L, 8L, 0.00011342557759731140),
-    (5L, 9L, 0.00011342557759600968),
-    (5L, 10L, 0.22199079418359468630),
-    (5L, 11L, 0.00033300429353065602),
-    (6L, 0L, 0.00000000000000000000),
-    (6L, 1L, 0.00000000000000000000),
-    (6L, 2L, 0.00000000000000000000),
-    (6L, 3L, 0.00000000000000000000),
-    (6L, 4L, 0.00000000000000000000),
-    (6L, 5L, 0.22199079418873823855),
-    (6L, 6L, 0.00033300429352296345),
-    (6L, 7L, 0.22199079418873823855),
-    (6L, 8L, 0.00000000000000000000),
-    (6L, 9L, 0.22199079418358211302),
-    (6L, 10L, 0.44442074580932766636),
-    (6L, 11L, 0.00000000000000000000),
-    (7L, 0L, 0.00000000000000000000),
-    (7L, 1L, 0.00000000000000000000),
-    (7L, 2L, 0.00000000000000000000),
-    (7L, 3L, 0.00000000000000000000),
-    (7L, 4L, 0.00000000000000000000),
-    (7L, 5L, 0.00000000000000000000),
-    (7L, 6L, 0.00000000000000000000),
-    (7L, 7L, 0.00011342641395794890),
-    (7L, 8L, 0.00000000000000000000),
-    (7L, 9L, 0.44442074413660648258),
-    (7L, 10L, 0.00000000000000000000),
-    (7L, 11L, 0.00033300429353067494),
-    (8L, 0L, 0.00000000000000000000),
-    (8L, 1L, 0.00000000000000000000),
-    (8L, 2L, 0.00000000000000000000),
-    (8L, 3L, 0.00000000000000000000),
-    (8L, 4L, 0.00000000000000000000),
-    (8L, 5L, 0.00000000000000000000),
-    (8L, 6L, 0.00000000000000000000),
-    (8L, 7L, 0.00000000000000000000),
-    (8L, 8L, 0.00011342474126757043),
-    (8L, 9L, 0.44442074748198723277),
-    (8L, 10L, 0.00000000000000000000),
-    (8L, 11L, 0.00000000000000000000),
-    (9L, 0L, 0.00000000000000000000),
-    (9L, 1L, 0.00000000000000000000),
-    (9L, 2L, 0.00000000000000000000),
-    (9L, 3L, 0.00000000000000000000),
-    (9L, 4L, 0.00000000000000000000),
-    (9L, 5L, 0.00000000000000000000),
-    (9L, 6L, 0.00000000000000000000),
-    (9L, 7L, 0.00000000000000000000),
-    (9L, 8L, 0.44442074748198723277),
-    (9L, 9L, 0.00011342474126757043),
-    (9L, 10L, 0.00000000000000000000),
-    (9L, 11L, 0.00000000000000000000),
-    (10L, 0L, 0.00000000000000000000),
-    (10L, 1L, 0.00000000000000000000),
-    (10L, 2L, 0.00000000000000000000),
-    (10L, 3L, 0.00000000000000000000),
-    (10L, 4L, 0.00000000000000000000),
-    (10L, 5L, 0.00000000000000000000),
-    (10L, 6L, 0.00000000000000000000),
-    (10L, 7L, 0.00000000000000000000),
-    (10L, 8L, 0.00000000000000000000),
-    (10L, 9L, 0.00000000000000000000),
-    (10L, 10L, 0.00011342306849026095),
-    (10L, 11L, 0.44442075082754178839),
-    (11L, 0L, 0.00000000000000000000),
-    (11L, 1L, 0.00000000000000000000),
-    (11L, 2L, 0.00000000000000000000),
-    (11L, 3L, 0.00000000000000000000),
-    (11L, 4L, 0.00000000000000000000),
-    (11L, 5L, 0.00000000000000000000),
-    (11L, 6L, 0.00000000000000000000),
-    (11L, 7L, 0.00000000000000000000),
-    (11L, 8L, 0.00000000000000000000),
-    (11L, 9L, 0.00000000000000000000),
-    (11L, 10L, 0.44442075082754178839),
-    (11L, 11L, 0.00011342306849026095)
-  ).toSeq
-
-  //python values 
-
-  val Ppython: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 1.21061850599e-06),
-    (0L, 2L, 0.00161272608841),
-    (0L, 3L, 0.00147777625032),
-    (0L, 4L, 0.0116448016938),
-    (0L, 5L, 0.0233008921175),
-    (0L, 6L, 0.00971242721275),
-    (0L, 7L, 0.000663936342514),
-    (0L, 8L, 0.000977139538678),
-    (0L, 9L, 0.000943005509878),
-    (0L, 10L, 0.00176995293271),
-    (0L, 11L, 0.00176949806365),
-    (1L, 0L, 1.21061850599e-06),
-    (1L, 2L, 0.00161272427418),
-    (1L, 3L, 0.00147763212784),
-    (1L, 4L, 0.0116428121443),
-    (1L, 5L, 0.0232961194364),
-    (1L, 6L, 0.00971043766328),
-    (1L, 7L, 0.000663792220034),
-    (1L, 8L, 0.000977137724443),
-    (1L, 9L, 0.00114485512681),
-    (1L, 10L, 0.00176995293271),
-    (1L, 11L, 0.00176949798455),
-    (2L, 0L, 0.00161272608841),
-    (2L, 1L, 0.00161272427418),
-    (2L, 3L, 0.0395496247653),
-    (2L, 4L, 0.0153316047243),
-    (2L, 5L, 0.00386525248373),
-    (2L, 6L, 0.000832371941572),
-    (2L, 7L, 0.000116220111043),
-    (2L, 8L, 1.68043332459e-05),
-    (2L, 9L, 1.99046786957e-05),
-    (2L, 10L, 0.00176718666645),
-    (2L, 11L, 0.00176673223188),
-    (3L, 0L, 0.00147777625032),
-    (3L, 1L, 0.00147763212784),
-    (3L, 2L, 0.0395496247653),
-    (3L, 4L, 0.0316751342404),
-    (3L, 5L, 0.00600007855719),
-    (3L, 6L, 0.000542040545244),
-    (3L, 7L, 2.45777105461e-05),
-    (3L, 8L, 7.06575648741e-05),
-    (3L, 9L, 7.98225950848e-05),
-    (3L, 10L, 0.00176810842818),
-    (3L, 11L, 0.0017676538356),
-    (4L, 0L, 0.0116448016938),
-    (4L, 1L, 0.0116428121443),
-    (4L, 2L, 0.0153316047243),
-    (4L, 3L, 0.0316751342404),
-    (4L, 5L, 0.0324454283342),
-    (4L, 6L, 0.00515596969872),
-    (4L, 7L, 0.000431022340842),
-    (4L, 8L, 0.000522756467887),
-    (4L, 9L, 0.00057508565536),
-    (4L, 10L, 0.00176903057844),
-    (4L, 11L, 0.00176857582783),
-    (5L, 0L, 0.0233008921175),
-    (5L, 1L, 0.0232961194364),
-    (5L, 2L, 0.00386525248373),
-    (5L, 3L, 0.00600007855719),
-    (5L, 4L, 0.0324454283342),
-    (5L, 6L, 0.0363170948844),
-    (5L, 7L, 0.00138447862319),
-    (5L, 8L, 0.0023405596124),
-    (5L, 9L, 0.00248651723147),
-    (5L, 10L, 0.00176995311733),
-    (5L, 11L, 0.00176949820867),
-    (6L, 0L, 0.00971242721275),
-    (6L, 1L, 0.00971043766328),
-    (6L, 2L, 0.000832371941572),
-    (6L, 3L, 0.000542040545244),
-    (6L, 4L, 0.00515596969872),
-    (6L, 5L, 0.0363170948844),
-    (6L, 7L, 0.0311190639765),
-    (6L, 8L, 0.00825255401715),
-    (6L, 9L, 0.00876316036746),
-    (6L, 10L, 0.00177087604496),
-    (6L, 11L, 0.00177042097824),
-    (7L, 0L, 0.000663936342514),
-    (7L, 1L, 0.000663792220034),
-    (7L, 2L, 0.000116220111043),
-    (7L, 3L, 2.45777105461e-05),
-    (7L, 4L, 0.000431022340842),
-    (7L, 5L, 0.00138447862319),
-    (7L, 6L, 0.0311190639765),
-    (7L, 8L, 0.0263478862739),
-    (7L, 9L, 0.0289655933976),
-    (7L, 10L, 0.00177179936144),
-    (7L, 11L, 0.00177134413663),
-    (8L, 0L, 0.000977139538678),
-    (8L, 1L, 0.000977137724443),
-    (8L, 2L, 1.68043332459e-05),
-    (8L, 3L, 7.06575648741e-05),
-    (8L, 4L, 0.000522756467887),
-    (8L, 5L, 0.0023405596124),
-    (8L, 6L, 0.00825255401715),
-    (8L, 7L, 0.0263478862739),
-    (8L, 9L, 0.0325759754447),
-    (8L, 10L, 0.00177272306687),
-    (8L, 11L, 0.00177226768397),
-    (9L, 0L, 0.000943005509878),
-    (9L, 1L, 0.00114485512681),
-    (9L, 2L, 1.99046786957e-05),
-    (9L, 3L, 7.98225950848e-05),
-    (9L, 4L, 0.00057508565536),
-    (9L, 5L, 0.00248651723147),
-    (9L, 6L, 0.00876316036746),
-    (9L, 7L, 0.0289655933976),
-    (9L, 8L, 0.0325759754447),
-    (9L, 10L, 0.0017726570736),
-    (9L, 11L, 0.00177220170104),
-    (10L, 0L, 0.00176995293271),
-    (10L, 1L, 0.00176995293271),
-    (10L, 2L, 0.00176718666645),
-    (10L, 3L, 0.00176810842818),
-    (10L, 4L, 0.00176903057844),
-    (10L, 5L, 0.00176995311733),
-    (10L, 6L, 0.00177087604496),
-    (10L, 7L, 0.00177179936144),
-    (10L, 8L, 0.00177272306687),
-    (10L, 9L, 0.0017726570736),
-    (10L, 11L, 0.0479334024786),
-    (11L, 0L, 0.00176949806365),
-    (11L, 1L, 0.00176949798455),
-    (11L, 2L, 0.00176673223188),
-    (11L, 3L, 0.0017676538356),
-    (11L, 4L, 0.00176857582783),
-    (11L, 5L, 0.00176949820867),
-    (11L, 6L, 0.00177042097824),
-    (11L, 7L, 0.00177134413663),
-    (11L, 8L, 0.00177226768397),
-    (11L, 9L, 0.00177220170104),
-    (11L, 10L, 0.0479334024786)
-  ).toSeq
-
-  val yPython: Seq[LabeledVector] = List(
-    LabeledVector(0,  new DenseVector(Array(1.62434536366, -0.61175641365))),
-    LabeledVector(1,  new DenseVector(Array(-0.528171752263, -1.07296862216))),
-    LabeledVector(2,  new DenseVector(Array(0.865407629325, -2.30153869688))),
-    LabeledVector(3,  new DenseVector(Array(1.74481176422, -0.761206900895))),
-    LabeledVector(4,  new DenseVector(Array(0.319039096057, -0.249370375477))),
-    LabeledVector(5,  new DenseVector(Array(1.46210793704, -2.0601407095))),
-    LabeledVector(6,  new DenseVector(Array(-0.322417204014, -0.384054354668))),
-    LabeledVector(7,  new DenseVector(Array(1.13376944234, -1.09989126731))),
-    LabeledVector(8,  new DenseVector(Array(-0.17242820755, -0.877858417921))),
-    LabeledVector(9,  new DenseVector(Array(0.0422137467156, 0.582815213716))),
-    LabeledVector(10,  new DenseVector(Array(-1.10061917721, 1.14472370984))),
-    LabeledVector(11,  new DenseVector(Array(0.901590720593, 0.502494338902)))
-  )
-
-  val Qpython: Seq[(Long, Long, Double)] = List(
-  (0L, 1L, 0.171055768509),
-  (0L, 2L, 0.225664832042),
-  (0L, 3L, 0.964461892243),
-  (0L, 4L, 0.352715261153),
-  (0L, 5L, 0.320088287924),
-  (0L, 6L, 0.206537629667),
-  (0L, 7L, 0.676159783261),
-  (0L, 8L, 0.232601114328),
-  (0L, 9L, 0.202833921466),
-  (0L, 10L, 0.0868760354493),
-  (0L, 11L, 0.36180379274),
-  (1L, 0L, 0.171055768509),
-  (1L, 2L, 0.224646006801),
-  (1L, 3L, 0.159651335863),
-  (1L, 4L, 0.417348284503),
-  (1L, 5L, 0.168471502669),
-  (1L, 6L, 0.659222809685),
-  (1L, 7L, 0.265761422093),
-  (1L, 8L, 0.858648095662),
-  (1L, 9L, 0.245883919866),
-  (1L, 10L, 0.160106173865),
-  (1L, 11L, 0.180952758129),
-  (2L, 0L, 0.225664832042),
-  (2L, 1L, 0.224646006801),
-  (2L, 3L, 0.241197865347),
-  (2L, 4L, 0.181491055953),
-  (2L, 5L, 0.707051443931),
-  (2L, 6L, 0.164266350969),
-  (2L, 7L, 0.397460291115),
-  (2L, 8L, 0.2436665721),
-  (2L, 9L, 0.10002855165),
-  (2L, 10L, 0.0597300703271),
-  (2L, 11L, 0.112817023823),
-  (3L, 0L, 0.964461892243),
-  (3L, 1L, 0.159651335863),
-  (3L, 2L, 0.241197865347),
-  (3L, 4L, 0.303508160071),
-  (3L, 5L, 0.361382585631),
-  (3L, 6L, 0.18464903107),
-  (3L, 7L, 0.672006963005),
-  (3L, 8L, 0.213246138488),
-  (3L, 9L, 0.175277603896),
-  (3L, 10L, 0.0785604659695),
-  (3L, 11L, 0.30230088289),
-  (4L, 0L, 0.352715261153),
-  (4L, 1L, 0.417348284503),
-  (4L, 2L, 0.181491055953),
-  (4L, 3L, 0.303508160071),
-  (4L, 5L, 0.17903514309),
-  (4L, 6L, 0.699493446847),
-  (4L, 7L, 0.418905836249),
-  (4L, 8L, 0.611046250924),
-  (4L, 9L, 0.565238362245),
-  (4L, 10L, 0.20165648983),
-  (4L, 11L, 0.525026174871),
-  (5L, 0L, 0.320088287924),
-  (5L, 1L, 0.168471502669),
-  (5L, 2L, 0.707051443931),
-  (5L, 3L, 0.361382585631),
-  (5L, 4L, 0.17903514309),
-  (5L, 6L, 0.142983878703),
-  (5L, 7L, 0.492638707121),
-  (5L, 8L, 0.197258119051),
-  (5L, 9L, 0.0999868464926),
-  (5L, 10L, 0.0560578142359),
-  (5L, 11L, 0.126882976017),
-  (6L, 0L, 0.206537629667),
-  (6L, 1L, 0.659222809685),
-  (6L, 2L, 0.164266350969),
-  (6L, 3L, 0.18464903107),
-  (6L, 4L, 0.699493446847),
-  (6L, 5L, 0.142983878703),
-  (6L, 7L, 0.27526203308),
-  (6L, 8L, 0.789677866679),
-  (6L, 9L, 0.483607520401),
-  (6L, 10L, 0.2536293934),
-  (6L, 11L, 0.304491494455),
-  (7L, 0L, 0.676159783261),
-  (7L, 1L, 0.265761422093),
-  (7L, 2L, 0.397460291115),
-  (7L, 3L, 0.672006963005),
-  (7L, 4L, 0.418905836249),
-  (7L, 5L, 0.492638707121),
-  (7L, 6L, 0.27526203308),
-  (7L, 8L, 0.362917011078),
-  (7L, 9L, 0.199084413254),
-  (7L, 10L, 0.0906553474254),
-  (7L, 11L, 0.276125123671),
-  (8L, 0L, 0.232601114328),
-  (8L, 1L, 0.858648095662),
-  (8L, 2L, 0.2436665721),
-  (8L, 3L, 0.213246138488),
-  (8L, 4L, 0.611046250924),
-  (8L, 5L, 0.197258119051),
-  (8L, 6L, 0.789677866679),
-  (8L, 7L, 0.362917011078),
-  (8L, 9L, 0.314501148528),
-  (8L, 10L, 0.168000113254),
-  (8L, 11L, 0.246372753043),
-  (9L, 0L, 0.202833921466),
-  (9L, 1L, 0.245883919866),
-  (9L, 2L, 0.10002855165),
-  (9L, 3L, 0.175277603896),
-  (9L, 4L, 0.565238362245),
-  (9L, 5L, 0.0999868464926),
-  (9L, 6L, 0.483607520401),
-  (9L, 7L, 0.199084413254),
-  (9L, 8L, 0.314501148528),
-  (9L, 10L, 0.381416146657),
-  (9L, 11L, 0.573072396471),
-  (10L, 0L, 0.0868760354493),
-  (10L, 1L, 0.160106173865),
-  (10L, 2L, 0.0597300703271),
-  (10L, 3L, 0.0785604659695),
-  (10L, 4L, 0.20165648983),
-  (10L, 5L, 0.0560578142359),
-  (10L, 6L, 0.2536293934),
-  (10L, 7L, 0.0906553474254),
-  (10L, 8L, 0.168000113254),
-  (10L, 9L, 0.381416146657),
-  (10L, 11L, 0.184457498993),
-  (11L, 0L, 0.36180379274),
-  (11L, 1L, 0.180952758129),
-  (11L, 2L, 0.112817023823),
-  (11L, 3L, 0.30230088289),
-  (11L, 4L, 0.525026174871),
-  (11L, 5L, 0.126882976017),
-  (11L, 6L, 0.304491494455),
-  (11L, 7L, 0.276125123671),
-  (11L, 8L, 0.246372753043),
-  (11L, 9L, 0.573072396471),
-  (11L, 10L, 0.184457498993)
-  )
-
-  val PQpython: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, -0.00409895597591),
-    (0L, 2L, -0.00379640693257),
-    (0L, 3L, -0.0216401487786),
-    (0L, 4L, 0.003190299728),
-    (0L, 5L, 0.0156284510368),
-    (0L, 6L, 0.00476176874021),
-    (0L, 7L, -0.0155434548491),
-    (0L, 8L, -0.00459825453952),
-    (0L, 9L, -0.00391887594699),
-    (0L, 10L, -0.000312445231982),
-    (0L, 11L, -0.00690285386959),
-    (1L, 0L, -0.00409895597591),
-    (1L, 2L, -0.00377198774506),
-    (1L, 3L, -0.00234917289466),
-    (1L, 4L, 0.00163907178953),
-    (1L, 5L, 0.0192578970872),
-    (1L, 6L, -0.00609097824977),
-    (1L, 7L, -0.00570644664678),
-    (1L, 8L, -0.0196044554534),
-    (1L, 9L, -0.00474892468034),
-    (1L, 10L, -0.00206775444987),
-    (1L, 11L, -0.0025678971265),
-    (2L, 0L, -0.00379640693257),
-    (2L, 1L, -0.00377198774506),
-    (2L, 3L, 0.0337681685843),
-    (2L, 4L, 0.0109813067409),
-    (2L, 5L, -0.0130826045584),
-    (2L, 6L, -0.00310505390906),
-    (2L, 7L, -0.00941080971341),
-    (2L, 8L, -0.00582382616877),
-    (2L, 9L, -0.00237775621013),
-    (2L, 10L, 0.000335470909825),
-    (2L, 11L, -0.000937465331247),
-    (3L, 0L, -0.0216401487786),
-    (3L, 1L, -0.00234917289466),
-    (3L, 2L, 0.0337681685843),
-    (3L, 4L, 0.02440011493),
-    (3L, 5L, -0.00266217714057),
-    (3L, 6L, -0.00388395336004),
-    (3L, 7L, -0.0160832713549),
-    (3L, 8L, -0.00504080228845),
-    (3L, 9L, -0.00412154040195),
-    (3L, 10L, -0.0001149674892),
-    (3L, 11L, -0.0054784273243),
-    (4L, 0L, 0.003190299728),
-    (4L, 1L, 0.00163907178953),
-    (4L, 2L, 0.0109813067409),
-    (4L, 3L, 0.02440011493),
-    (4L, 5L, 0.0281539980053),
-    (4L, 6L, -0.0116107239285),
-    (4L, 7L, -0.00961005216345),
-    (4L, 8L, -0.0141238786471),
-    (4L, 9L, -0.0129735451272),
-    (4L, 10L, -0.00306462811866),
-    (4L, 11L, -0.0108161782682),
-    (5L, 0L, 0.0156284510368),
-    (5L, 1L, 0.0192578970872),
-    (5L, 2L, -0.0130826045584),
-    (5L, 3L, -0.00266217714057),
-    (5L, 4L, 0.0281539980053),
-    (5L, 6L, 0.0328898048952),
-    (5L, 7L, -0.0104239554779),
-    (5L, 8L, -0.0023876711702),
-    (5L, 9L, 8.98560054763e-05),
-    (5L, 10L, 0.000426260476689),
-    (5L, 11L, -0.00127185692479),
-    (6L, 0L, 0.00476176874021),
-    (6L, 1L, -0.00609097824977),
-    (6L, 2L, -0.00310505390906),
-    (6L, 3L, -0.00388395336004),
-    (6L, 4L, -0.0116107239285),
-    (6L, 5L, 0.0328898048952),
-    (6L, 7L, 0.0245210976958),
-    (6L, 8L, -0.0106758389714),
-    (6L, 9L, -0.00282879830913),
-    (6L, 10L, -0.00430856094359),
-    (6L, 11L, -0.00552816862633),
-    (7L, 0L, -0.0155434548491),
-    (7L, 1L, -0.00570644664678),
-    (7L, 2L, -0.00941080971341),
-    (7L, 3L, -0.0160832713549),
-    (7L, 4L, -0.00961005216345),
-    (7L, 5L, -0.0104239554779),
-    (7L, 6L, 0.0245210976958),
-    (7L, 8L, 0.0176488507586),
-    (7L, 9L, 0.0241935867719),
-    (7L, 10L, -0.000401188023652),
-    (7L, 11L, -0.00484731022282),
-    (8L, 0L, -0.00459825453952),
-    (8L, 1L, -0.0196044554534),
-    (8L, 2L, -0.00582382616877),
-    (8L, 3L, -0.00504080228845),
-    (8L, 4L, -0.0141238786471),
-    (8L, 5L, -0.0023876711702),
-    (8L, 6L, -0.0106758389714),
-    (8L, 7L, 0.0176488507586),
-    (8L, 9L, 0.025037456783),
-    (8L, 10L, -0.00225420018876),
-    (8L, 11L, -0.00413322933963),
-    (9L, 0L, -0.00391887594699),
-    (9L, 1L, -0.00474892468034),
-    (9L, 2L, -0.00237775621013),
-    (9L, 3L, -0.00412154040195),
-    (9L, 4L, -0.0129735451272),
-    (9L, 5L, 8.98560054763e-05),
-    (9L, 6L, -0.00282879830913),
-    (9L, 7L, 0.0241935867719),
-    (9L, 8L, 0.025037456783),
-    (9L, 10L, -0.00736979837657),
-    (9L, 11L, -0.0119642090419),
-    (10L, 0L, -0.000312445231982),
-    (10L, 1L, -0.00206775444987),
-    (10L, 2L, 0.000335470909825),
-    (10L, 3L, -0.0001149674892),
-    (10L, 4L, -0.00306462811866),
-    (10L, 5L, 0.000426260476689),
-    (10L, 6L, -0.00430856094359),
-    (10L, 7L, -0.000401188023652),
-    (10L, 8L, -0.00225420018876),
-    (10L, 9L, -0.00736979837657),
-    (10L, 11L, 0.0435119995522),
-    (11L, 0L, -0.00690285386959),
-    (11L, 1L, -0.0025678971265),
-    (11L, 2L, -0.000937465331247),
-    (11L, 3L, -0.0054784273243),
-    (11L, 4L, -0.0108161782682),
-    (11L, 5L, -0.00127185692479),
-    (11L, 6L, -0.00552816862633),
-    (11L, 7L, -0.00484731022282),
-    (11L, 8L, -0.00413322933963),
-    (11L, 9L, -0.0119642090419),
-    (11L, 10L, 0.0435119995522)
-  ).toSeq
-
-
-  val gradientPython: Seq[LabeledVector] = List(
-    LabeledVector(0,  new DenseVector(Array(-0.00566442216449, 8.87565995793e-05))),
-    LabeledVector(1,  new DenseVector(Array(0.00698157922698, 0.0114480751854))),
-    LabeledVector(2,  new DenseVector(Array(-0.00231221623345, -0.00350751579765))),
-    LabeledVector(3,  new DenseVector(Array(0.00128279798757, 0.0100734251804))),
-    LabeledVector(4,  new DenseVector(Array(-0.0240691470294, 0.0192708211105))),
-    LabeledVector(5,  new DenseVector(Array(0.012079547862, -0.0226398581461))),
-    LabeledVector(6,  new DenseVector(Array(-0.0106904234539, 0.0103395649005))),
-    LabeledVector(7,  new DenseVector(Array(0.0297027660167, -0.00930258890877))),
-    LabeledVector(8,  new DenseVector(Array(-0.00610029137127, -0.00377248701792))),
-    LabeledVector(9,  new DenseVector(Array(0.0026481112638, 0.00869401889329))),
-    LabeledVector(10,  new DenseVector(Array(-0.0105084299376, -0.00045810929434))),
-    LabeledVector(11,  new DenseVector(Array(0.00665012783303, -0.020234102705)))
-  ).toSeq
+  private def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
+                        fields: Array[Int]): DataSet[LabeledVector] = {
+    env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
+      .groupBy(_._1).reduceGroup(
+        elements => {
+          val elementsIterable = elements.toIterable
+          val entries = elementsIterable.map(x => (x._2, x._3))
+          LabeledVector(elementsIterable.head._1.toDouble, SparseVector.fromCOO(dimension, entries))
+        })
+  }
 }
