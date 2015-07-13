@@ -24,6 +24,7 @@ import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.{DenseVector, SparseVector}
 import org.apache.flink.ml.metrics.distances.SquaredEuclideanDistanceMetric
 import org.scalatest._
+import org.apache.flink.ml.math.Breeze._
 
 
 class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
@@ -44,7 +45,6 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
   "pairwiseAffinities" should "return the pairwise similarity p_i|j between datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(1)
 
     val perplexity = 2.0
     val neighbors = 10
@@ -200,16 +200,48 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     }
   }
 
-  /*"enrichGradient" should "return the gradient with momentum and gain" in {
+  "initWorkingSet" should "randomly initialize the embedding and initialize gradient and gains to zero" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val randomState = 0
+    val nComponents = 2
+
+    val zeroVector = breeze.linalg.DenseVector.fill(nComponents, 0.0).fromBreeze
+    val oneVector = breeze.linalg.DenseVector.fill(nComponents, 1.0).fromBreeze
+
+    val input = TsneHelpersTestSuite
+      .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
+
+    val results = initWorkingSet(input, nComponents, randomState).collect()
+
+    results.size should equal (input.count())
+    for (result <- results) {
+      result._3 should equal (zeroVector)
+      result._4 should equal (oneVector)
+    }
+  }
+
+  "enrichGradient" should "return the gradient with momentum and gain" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
 
     val minGain = 0.01
     val momentum = 0.5
     val learningRate = 300
+    val nComponents = 2
 
-    val gradient = env.fromCollection(TsneHelpersTestSuite.denseGradientResults)
+    val gradientSeq = TsneHelpersTestSuite.denseGradientResults
+    val gradient = env.fromCollection(gradientSeq)
 
-    val workingSet =
+    val workingSetSeq = gradientSeq.map( g => {
+
+      val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
+      val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
+
+      (g.label, g.vector, lastGradient.fromBreeze, gains.fromBreeze)
+    })
+
+    val workingSet = env.fromCollection(workingSetSeq)
 
     val results = enrichGradientByMomentumAndGain(gradient, workingSet, minGain, momentum, learningRate)
       .map(x => LabeledVector(x._1, x._2)).collect()
@@ -222,13 +254,13 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
       result match {
         case Some(result) => {
           for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-6)
+            result.vector(i) should equal (expected.vector(i) +- 1e-9)
           }
         }
         case _ => fail("expected result not found")
       }
     }
-  }*/
+  }
 }
 
 object TsneHelpersTestSuite {
@@ -319,17 +351,17 @@ object TsneHelpersTestSuite {
     LabeledVector(9.0, DenseVector(8.000000000000e-01, 8.000000000000e-01))
   ).toSeq
 
-  val updatedEmbeddingResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(-5.578764518042e+00, 7.218743286398e+00)),
-    LabeledVector(1.0, DenseVector(2.992845222883e+00, 1.437406819745e+00)),
-    LabeledVector(2.0, DenseVector(9.425683157355e-02, -7.793602851380e+00)),
-    LabeledVector(3.0, DenseVector(1.446869982434e+00, -1.231602553089e+01)),
-    LabeledVector(4.0, DenseVector(-3.491313518441e+00, -1.683216644908e+00)),
-    LabeledVector(5.0, DenseVector(-2.029806120378e+00, 1.683641489306e+00)),
-    LabeledVector(6.0, DenseVector(8.519845790703e+00, -4.125353214736e+00)),
-    LabeledVector(7.0, DenseVector(6.262143844159e+00, 5.773194456381e+00)),
-    LabeledVector(8.0, DenseVector(-1.518311629065e+01, 3.487205783192e+00)),
-    LabeledVector(9.0, DenseVector(5.128595384047e+00, 3.829480587797e-01))
+  val updatedAndCentredEmbeddingResults: Seq[LabeledVector] = List(
+    LabeledVector(0.0, DenseVector(-5.394920178871e+00, 7.812249121209e+00)),
+    LabeledVector(1.0, DenseVector(3.176689562054e+00, 2.030912654557e+00)),
+    LabeledVector(2.0, DenseVector(2.781011707444e-01, -7.200097016568e+00)),
+    LabeledVector(3.0, DenseVector(1.630714321604e+00, -1.172251969608e+01)),
+    LabeledVector(4.0, DenseVector(-3.307469179270e+00, -1.089710810096e+00)),
+    LabeledVector(5.0, DenseVector(-1.845961781207e+00, 2.277147324118e+00)),
+    LabeledVector(6.0, DenseVector(8.703690129873e+00, -3.531847379924e+00)),
+    LabeledVector(7.0, DenseVector(6.445988183330e+00, 6.366700291192e+00)),
+    LabeledVector(8.0, DenseVector(-1.499927195148e+01, 4.080711618003e+00)),
+    LabeledVector(9.0, DenseVector(5.312439723218e+00, 9.764538935911e-01))
   ).toSeq
 
   val centeringInput: Seq[LabeledVector] = List(
