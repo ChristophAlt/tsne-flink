@@ -22,9 +22,12 @@ import de.tu_berlin.dima.impro3.TsneHelpers._
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
 import org.apache.flink.core.fs.FileSystem.WriteMode
+import org.apache.flink.ml.classification.KNN
 import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math.SparseVector
+import org.apache.flink.ml.math.{Vector, SparseVector}
 import org.apache.flink.ml.metrics.distances._
+
+import scala.util.Try
 
 
 object Tsne {
@@ -41,23 +44,26 @@ object Tsne {
 
     val metric = SquaredEuclideanDistanceMetric()
     val perplexity = parameters.getDouble("perplexity", 30.0)
-    val nComponents = parameters.getLong("nComponents", 2)
+    val nComponents = parameters.getInt("nComponents", 2)
     val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
     val learningRate = parameters.getDouble("learningRate", 1000)
-    val iterations = parameters.getLong("iterations", 300)
+    val iterations = parameters.getInt("iterations", 300)
 
-    val randomState = parameters.getLong("randomState", 0)
-    val neighbors = parameters.getLong("neighbors", 3 * perplexity.toInt)
+    val randomState = parameters.getInt("randomState", 0)
+    val neighbors = parameters.getInt("neighbors", 3 * perplexity.toInt)
 
     val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
 
-    val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
+    val bruteForce = Try(parameters.get("bruteForce", "true").toBoolean).getOrElse(true)
+
+
+    val input = readInput(inputPath, inputDimension, env, Array(0, 1, 2))
 
     val result = computeEmbedding(env, input, metric, perplexity, inputDimension, nComponents, learningRate, iterations,
-      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
+      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, bruteForce)
 
-    result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
+    result.map(x => (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode = WriteMode.OVERWRITE)
 
     env.execute("TSNE")
   }
@@ -70,20 +76,36 @@ object Tsne {
           val elementsIterable = elements.toIterable
           val entries = elementsIterable.map(x => (x._2, x._3))
           LabeledVector(elementsIterable.head._1.toDouble, SparseVector.fromCOO(dimension, entries))
-    })
+        })
   }
 
   private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[LabeledVector], metric: DistanceMetric,
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
-                               finalMomentum: Double):
+                               finalMomentum: Double, bruteForce: Boolean):
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
-    
+
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
-    val knn = kNearestNeighbors(input, neighbors, metric)
+    var knn: DataSet[(Long, Long, Double)] = null
+    if (bruteForce) {
+      knn = kNearestNeighbors(input, neighbors, metric);
+    }
+    else {
+
+      val flinkKnn = KNN()
+        .setK(neighbors)
+        .setDistanceMetric(metric)
+
+      flinkKnn.fit(input)
+      //
+      // Problem : Wie machen wir das mit den indexes ?
+      knn = flinkKnn.predict(input)
+      //    val predictionDS:DataSet[(Vector, Array[Vector])] = knn.predict(train)
+
+    }
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 
