@@ -178,10 +178,10 @@ object TsneHelpers {
 
   def centerEmbedding(embedding: DataSet[(Double, Vector, Vector, Vector)]): DataSet[(Double, Vector, Vector, Vector)] = {
     // center embedding
-    val sumAndCount = embedding.map(x => (x._2.asBreeze, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
+    val sumAndCount = embedding.map(x => (x._2, 1)).reduce((x, y) => ((x._1.asBreeze + y._1.asBreeze).fromBreeze, x._2 + y._2))
 
     embedding.mapWithBcVariable(sumAndCount) {
-      (v, sumAndCount) => (v._1, (v._2.asBreeze - (sumAndCount._1 :/ sumAndCount._2.toDouble)).fromBreeze, v._3, v._4)
+      (v, sumAndCount) => (v._1, (v._2.asBreeze - (sumAndCount._1.asBreeze :/ sumAndCount._2.toDouble)).fromBreeze, v._3, v._4)
     }
   }
 
