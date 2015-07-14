@@ -31,6 +31,7 @@ import org.apache.flink.ml.math.Breeze._
 
 import scala.math._
 import scala.util.Random
+import scala.collection.JavaConverters._
 
 
 object TsneHelpers {
@@ -122,6 +123,32 @@ object TsneHelpers {
       .filter(x => x._1 != x._2)
 
     distances
+  }
+
+  def sumLowDimAffinities(embedding: DataSet[LabeledVector], metric: DistanceMetric): DataSet[Double] = {
+    embedding
+      .map(new RichMapFunction[LabeledVector, Double] {
+      private var broadcastEmbedding: Traversable[LabeledVector] = null
+
+      override def open(parameters: Configuration) {
+        broadcastEmbedding = getRuntimeContext
+          .getBroadcastVariable[LabeledVector]("embedding").asScala
+      }
+
+      def map(vector: LabeledVector): Double = {
+        val leftVector = vector.vector
+        val index = vector.label
+        broadcastEmbedding
+          .map(rightVector => {
+            if (index != rightVector.label) {
+              1 / (1 + metric.distance(leftVector, rightVector.vector))
+            } else {
+              0.0
+            }
+        }).sum
+      }
+    }).withBroadcastSet(embedding, "embedding")
+    .reduce((x, y) => x + y)
   }
 
   // Compute Q-matrix and normalization sum
@@ -218,7 +245,8 @@ object TsneHelpers {
       val results = computeLowDimAffinities(distances)
 
       val lowDimAffinities = results.q
-      val sumAffinities = results.sumQ
+      //val sumAffinities = results.sumQ
+      val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
 
       val dY = gradient(lowDimAffinities, highdimAffinites, sumAffinities, distances)
 

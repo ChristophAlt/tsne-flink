@@ -156,6 +156,19 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     results(0) should equal (expectedResult +- 1e-12)
   }
 
+  "sumLowDimAffinities" should "return the sum over Q" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
+
+    val results = sumLowDimAffinities(embedding, SquaredEuclideanDistanceMetric()).collect()
+
+    val expectedResult = TsneHelpersTestSuite.denseSumQ
+
+    results.size should equal (1)
+    results(0) should equal (expectedResult +- 1e-12)
+  }
+
   "centerEmbedding" should "compute the centered embedding as LabeledVectors" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
