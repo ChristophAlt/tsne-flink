@@ -91,24 +91,16 @@ object TsneHelpers {
   }
 
   def initWorkingSet(input: DataSet[LabeledVector], nComponents: Int, randomState: Int): DataSet[(Double, Vector, Vector, Vector)] = {
-    // init Y (embedding) by sampling from N(0, 10e-4*I)
+    // init Y (embedding) by sampling from N(0, I)
     input
       .map(new RichMapFunction[LabeledVector, (Double, Vector, Vector, Vector)] {
       private var gaussian: Random = null
-      private val sigma = 10e-2
 
       override def open(parameters: Configuration) {
         gaussian = new Random(randomState)
       }
 
       def map(inp: LabeledVector): (Double, Vector, Vector, Vector) = {
-        /*var yValues = Array.fill(nComponents){gaussian.nextDouble * sigma, gaussian.nextDouble * sigma}
-        var lastGradientValues = Array.fill(nComponents){(0.0).toDouble}
-        var gainValues = Array.fill(nComponents){(1.0).toDouble}
-        
-        val y = DenseVector(yValues)
-        val lastGradient = DenseVector(lastGradientValues)
-        val gains = DenseVector(gainValues)*/
 
         val y = breeze.linalg.DenseVector.rand[Double](nComponents)
         val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
@@ -147,16 +139,6 @@ object TsneHelpers {
     new {
       val q = unnormAffinities
       val sumQ = sumOverAllAffinities
-    }
-  }
-  
-  def calcPQ_unittest(lowDimAffinities: DataSet[(Long, Long, Double)],
-               highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double]) = {
-        highDimAffinities
-        .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
-      //                i           j       (p - (num / sum(num)) * num
-      //                                    (p -  q)              * num    
-      (pQ, sumQ) => (pQ._1._1, pQ._1._2, pQ._1._3 - (pQ._2._3 / sumQ))
     }
   }
 
