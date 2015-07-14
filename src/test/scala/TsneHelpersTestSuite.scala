@@ -203,10 +203,9 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
     val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
-    val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
-    val r = computeLowDimAffinities(distances)
+    val sumQ = env.fromCollection(List(TsneHelpersTestSuite.denseSumQ))
 
-    val results = gradient(r.q, jointDistribution, r.sumQ, distances).collect()
+    val results = gradient(jointDistribution, embedding, SquaredEuclideanDistanceMetric(), sumQ).collect()
 
     val expectedResults = TsneHelpersTestSuite.denseGradientResults
     

@@ -128,17 +128,17 @@ object TsneHelpers {
   def sumLowDimAffinities(embedding: DataSet[LabeledVector], metric: DistanceMetric): DataSet[Double] = {
     embedding
       .map(new RichMapFunction[LabeledVector, Double] {
-      private var broadcastEmbedding: Traversable[LabeledVector] = null
+      private var embedding: Traversable[LabeledVector] = null
 
       override def open(parameters: Configuration) {
-        broadcastEmbedding = getRuntimeContext
+        embedding = getRuntimeContext
           .getBroadcastVariable[LabeledVector]("embedding").asScala
       }
 
       def map(vector: LabeledVector): Double = {
         val leftVector = vector.vector
         val index = vector.label
-        broadcastEmbedding
+        embedding
           .map(rightVector => {
             if (index != rightVector.label) {
               1 / (1 + metric.distance(leftVector, rightVector.vector))
@@ -169,11 +169,11 @@ object TsneHelpers {
     }
   }
 
-  def gradient(lowDimAffinities: DataSet[(Long, Long, Double)],
-               highDimAffinities: DataSet[(Long, Long, Double)], sumOverAllAffinities: DataSet[Double],
-               distances: DataSet[(Long, Long, Double, Vector)]): DataSet[LabeledVector] = {
+  def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
+               metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
+    DataSet[LabeledVector] = {
     // this is not the optimized version
-    highDimAffinities
+    /*highDimAffinities
       .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
       //                i           j       (p - (q / sum(q)) * q
       (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - max(pQ._2._3 / sumQ, 1e-12)) * pQ._2._3)
@@ -182,7 +182,59 @@ object TsneHelpers {
     //                             ((p -  q)* num) * (yi -yj)      
       (mul, d) => (mul._1, mul._2, (mul._3         * d._4.asBreeze).fromBreeze)
     }.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2, (v1._3.asBreeze + v2._3.asBreeze).fromBreeze))
-      .map(g => LabeledVector(g._1, g._3))
+      .map(g => LabeledVector(g._1, g._3))*/
+    // compute attracting forces
+    val attrForces = highDimAffinities
+      .map(new RichMapFunction[(Long, Long, Double), (Long, Vector)] {
+      private var embedding: Map[Long, Vector] = null
+
+      override def open(parameters: Configuration) {
+        embedding = getRuntimeContext.getBroadcastVariable[LabeledVector]("embedding")
+          .asScala.map(x => x.label.toLong -> x.vector).toMap
+      }
+
+      def map(pij: (Long, Long, Double)): (Long, Vector) = {
+        val i = pij._1
+        val j = pij._2
+        val p = pij._3
+
+        val partialGradient = (p / (1 + metric.distance(embedding(i), embedding(j))) *
+          (embedding(i).asBreeze - embedding(j).asBreeze)).fromBreeze
+
+        (i, partialGradient)
+      }
+    }).withBroadcastSet(embedding, "embedding")
+      .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
+
+    // compute repulsive forces
+    val repForces = embedding
+      .map(new RichMapFunction[LabeledVector, (Long, Vector)] {
+      private var embedding: Traversable[LabeledVector] = null
+      private var sumQ: Double = 0.0
+
+      override def open(parameters: Configuration) {
+        embedding = getRuntimeContext.getBroadcastVariable[LabeledVector]("embedding").asScala
+        sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
+      }
+
+      def map(vector: LabeledVector): (Long, Vector) = {
+        val leftVector = vector.vector
+        val index = vector.label.toLong
+        val sumVector = embedding
+          .map(rightVector => {
+            val Z = 1 / (1 + metric.distance(leftVector, rightVector.vector))
+            val q = Z / sumQ
+            q * Z * (leftVector.asBreeze - rightVector.vector.asBreeze)
+        }).reduce((v1, v2) => v1 + v2)
+
+        (index, sumVector.fromBreeze)
+      }
+    }).withBroadcastSet(embedding, "embedding")
+      .withBroadcastSet(sumOverAllAffinities, "sumQ")
+      .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
+
+    // put everything together
+    attrForces.join(repForces).where(0).equalTo(0)((attr, rep) => LabeledVector(attr._1, (attr._2.asBreeze - rep._2.asBreeze).fromBreeze))
   }
 
   def centerEmbedding(embedding: DataSet[(Double, Vector, Vector, Vector)]): DataSet[(Double, Vector, Vector, Vector)] = {
@@ -238,17 +290,17 @@ object TsneHelpers {
       // (label, embedding, gradient, gains)
       workingSet =>
 
-      val currentEmbedding = workingSet.map { t => LabeledVector(t._1, t._2) }
+      val currentEmbedding = workingSet.map(t => LabeledVector(t._1, t._2))
       // compute pairwise differences yi - yj
       val distances = computeDistances(currentEmbedding, metric)
       // Compute Q-matrix and normalization sum
-      val results = computeLowDimAffinities(distances)
+      //val results = computeLowDimAffinities(distances)
 
-      val lowDimAffinities = results.q
+      //val lowDimAffinities = results.q
       //val sumAffinities = results.sumQ
       val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
 
-      val dY = gradient(lowDimAffinities, highdimAffinites, sumAffinities, distances)
+      val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities)
 
       val minGain = 0.01
 
