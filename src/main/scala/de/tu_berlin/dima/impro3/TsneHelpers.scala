@@ -400,12 +400,11 @@ object TsneHelpers {
 
 
     println("Join Finished")
-    var preResult: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = iterateGraph(merged, k, metric)
-    for (i <- 1 until maxIterations) {
-      preResult = iterateGraph(preResult, k, metric)
+    val preResult = merged.iterate(maxIterations) {
+      preResult => iterateGraph(merged, k, metric)
     }
 
-    val result = preResult.flatMap((element, collector: Collector[(Long, Long, Double)]) => {
+    val result: DataSet[(Long, Long, Double)] = preResult.flatMap((element, collector: Collector[(Long, Long, Double)]) => {
       for (a <- element._3) {
         collector.collect(element._1, a._1.label.toLong, a._2)
       }
