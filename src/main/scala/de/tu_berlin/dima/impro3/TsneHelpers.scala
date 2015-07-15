@@ -24,11 +24,12 @@ import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.{DenseVector, Vector}
-import org.apache.flink.ml.metrics.distances.DistanceMetric
+import org.apache.flink.ml.metrics.distances.{SquaredEuclideanDistanceMetric, DistanceMetric}
 import org.apache.flink.util.Collector
 import org.apache.flink.ml._
 import org.apache.flink.ml.math.Breeze._
 
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.math._
 import scala.util.Random
 import scala.collection.JavaConverters._
@@ -106,7 +107,7 @@ object TsneHelpers {
         val y = breeze.linalg.DenseVector.rand[Double](nComponents)
         val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
         val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
-        
+
         (inp.label, y.fromBreeze, lastGradient.fromBreeze, gains.fromBreeze)
       }
     })
@@ -140,20 +141,19 @@ object TsneHelpers {
         val index = vector.label
         embedding
           .map(rightVector => {
-            if (index != rightVector.label) {
-              1 / (1 + metric.distance(leftVector, rightVector.vector))
-            } else {
-              0.0
-            }
+          if (index != rightVector.label) {
+            1 / (1 + metric.distance(leftVector, rightVector.vector))
+          } else {
+            0.0
+          }
         }).sum
       }
     }).withBroadcastSet(embedding, "embedding")
-    .reduce((x, y) => x + y)
+      .reduce((x, y) => x + y)
   }
 
   // Compute Q-matrix and normalization sum
-  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, Vector)]):
-    {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[Double]} = {
+  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, Vector)]): {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[Double]} = {
     // unnormalized q_ij
     val unnormAffinities = distances
       .map { d =>
@@ -171,7 +171,7 @@ object TsneHelpers {
 
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
                metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
-    DataSet[LabeledVector] = {
+  DataSet[LabeledVector] = {
     // this is not the optimized version
     /*highDimAffinities
       .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
@@ -222,9 +222,9 @@ object TsneHelpers {
         val index = vector.label.toLong
         val sumVector = embedding
           .map(rightVector => {
-            val Z = 1 / (1 + metric.distance(leftVector, rightVector.vector))
-            val q = Z / sumQ
-            q * Z * (leftVector.asBreeze - rightVector.vector.asBreeze)
+          val Z = 1 / (1 + metric.distance(leftVector, rightVector.vector))
+          val q = Z / sumQ
+          q * Z * (leftVector.asBreeze - rightVector.vector.asBreeze)
         }).reduce((v1, v2) => v1 + v2)
 
         (index, sumVector.fromBreeze)
@@ -255,7 +255,7 @@ object TsneHelpers {
       (lv, sumAndCount) => LabeledVector(lv.label, (lv.vector.asBreeze - (sumAndCount._1 :/ sumAndCount._2.toDouble)).fromBreeze)
     }
   }
-  
+
   def updateEmbedding(gradient: DataSet[LabeledVector], workingSet: DataSet[(Double, Vector, Vector, Vector)], minGain: Double, momentum: Double, learningRate: Double):
   DataSet[(Double, Vector, Vector, Vector)] = {
     gradient.map(t => (t.label, t.vector)).join(workingSet).where(0).equalTo(0) {
@@ -271,7 +271,7 @@ object TsneHelpers {
         val newGradient = new Array[Double](d)
 
         for (i <- 0 until d) {
-          if ((currentGradient (i) > 0.0) == (previousGradient(i) > 0.0)) {
+          if ((currentGradient(i) > 0.0) == (previousGradient(i) > 0.0)) {
             newGain(i) = Math.max(gain(i) * 0.8, minGain)
           } else {
             newGain(i) = Math.max(gain(i) + 0.2, minGain)
@@ -282,35 +282,36 @@ object TsneHelpers {
         (dY._1, DenseVector(newEmbedding), DenseVector(newGradient), DenseVector(newGain))
     }
   }
-  
-  def iterationComputation (iterations: Int, momentum: Double, workingSet: DataSet[(Double, Vector, Vector, Vector)],
-                            highdimAffinites: DataSet[(Long, Long, Double)], metric: DistanceMetric,
-                            learningRate: Double) = {
+
+  def iterationComputation(iterations: Int, momentum: Double, workingSet: DataSet[(Double, Vector, Vector, Vector)],
+                           highdimAffinites: DataSet[(Long, Long, Double)], metric: DistanceMetric,
+                           learningRate: Double) = {
     workingSet.iterate(iterations) {
       // (label, embedding, gradient, gains)
       workingSet =>
 
-      val currentEmbedding = workingSet.map(t => LabeledVector(t._1, t._2))
-      // compute pairwise differences yi - yj
-      val distances = computeDistances(currentEmbedding, metric)
-      // Compute Q-matrix and normalization sum
-      //val results = computeLowDimAffinities(distances)
+        val currentEmbedding = workingSet.map(t => LabeledVector(t._1, t._2))
+        // compute pairwise differences yi - yj
+        val distances = computeDistances(currentEmbedding, metric)
+        // Compute Q-matrix and normalization sum
+        //val results = computeLowDimAffinities(distances)
 
-      //val lowDimAffinities = results.q
-      //val sumAffinities = results.sumQ
-      val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
+        //val lowDimAffinities = results.q
+        //val sumAffinities = results.sumQ
+        val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
 
-      val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities)
+        val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities)
 
-      val minGain = 0.01
+        val minGain = 0.01
 
-      val updatedEmbedding = updateEmbedding(dY, workingSet, minGain, momentum, learningRate)
+        val updatedEmbedding = updateEmbedding(dY, workingSet, minGain, momentum, learningRate)
 
-      val centeredEmbedding = centerEmbedding(updatedEmbedding)
+        val centeredEmbedding = centerEmbedding(updatedEmbedding)
 
-      centeredEmbedding
+        centeredEmbedding
     }
   }
+
 
   def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialWorkingSet: DataSet[(Double, Vector, Vector, Vector)],
                learningRate: Double, iterations: Int, metric: DistanceMetric,
@@ -318,7 +319,7 @@ object TsneHelpers {
   DataSet[LabeledVector] = {
 
     val iterInitMomentumExaggeration = min(iterations, 20)
-    val iterExaggeration = min(iterations - iterInitMomentumExaggeration, 101-20)
+    val iterExaggeration = min(iterations - iterInitMomentumExaggeration, 101 - 20)
     val iterWoExaggeration = iterations - iterExaggeration - iterInitMomentumExaggeration
 
     var embedding: DataSet[(Double, Vector, Vector, Vector)] = null
@@ -344,6 +345,55 @@ object TsneHelpers {
 
     embedding.map(x => LabeledVector(x._1, x._2))
   }
+
+  def knnDescent(input: DataSet[LabeledVector], maxIterations: Int = 10, numberNodes: Int = 10,
+                 metric: DistanceMetric = SquaredEuclideanDistanceMetric): DataSet[(Long, Long, Double)] = {
+    val r = new Random()
+    val randomizedData: DataSet[(Int, LabeledVector)] = input.flatMap(vector => {
+      val ls = scala.collection.mutable.ArrayBuffer.empty[(Int, LabeledVector)]
+      for (i <- 0 until (10)) {
+        ls.append((r.nextInt(20), vector))
+      }
+      ls
+    }
+    )
+
+    val random_nl: DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = randomizedData.mapPartition(iter => {
+      val nodes = scala.collection.mutable.ListBuffer.empty[(LabeledVector)]
+      while (iter.hasNext) {
+        nodes.append(iter.next()._2)
+      }
+      val list = nodes.toList
+      val neighbors = scala.collection.mutable.ArrayBuffer.empty[(LabeledVector, Array[(LabeledVector, Double)])]
+      for (a <- nodes) {
+        val tmp = new ArrayBuffer[(LabeledVector, Double)]()
+        for (i <- 0 until numberNodes) {
+          tmp.append((list(r.nextInt(list.size)), Double.MaxValue))
+        }
+        neighbors.append((a, tmp.toArray))
+
+      }
+      neighbors
+    })
+
+    val merged: DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = random_nl.join(random_nl).where(0).equalTo(0) {
+      (left, right) => {
+        val joined = scala.collection.mutable.ArrayBuffer(right._2, left._2)
+        (left._1, joined.toArray)
+      }
+    }.map(element => (element._1, element._2.flatten(ar => {
+      ar
+    }).toArray))
+
+    //merged.iterate
+
+
+    null
+
+  }
+
+  private def iterateGraph(input: DataSet[(LabeledVector, )])
+
 
   //============================= binary search ===============================================//
 
@@ -417,4 +467,6 @@ object TsneHelpers {
     //            i     j      p_i|j
     p.map(p => (p._1, p._2, p._3 / sumP))
   }
+
+
 }
