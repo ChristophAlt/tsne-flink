@@ -28,7 +28,7 @@ import org.apache.flink.ml.math.Breeze._
 
 
 class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
-  "kNearestNeighbors" should "return the k nearest neighbors for each SparseVector" in  {
+  "kNearestNeighbors" should "return the k nearest neighbors for each SparseVector" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val neighbors = 2
@@ -39,9 +39,30 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val results = kNearestNeighbors(input, neighbors, metric).collect()
     val expectedResults = TsneHelpersTestSuite.knnResults
 
-    results.size should equal (expectedResults.size)
-    forAll(results) {expectedResults should contain (_)}
+    results.size should equal(expectedResults.size)
+    forAll(results) {
+      expectedResults should contain(_)
+    }
   }
+
+  "knnDescent" should "return the k nerest neighbors for each SparseVector" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val neighbors = 2
+    val metric = SquaredEuclideanDistanceMetric()
+
+    val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
+
+    val results = knnDescent(input, 10, 10, metric).collect()
+    val expectedResults = TsneHelpersTestSuite.knnResults
+
+    results.size should equal(expectedResults.size)
+    forAll(results) {
+      expectedResults should contain(_)
+    }
+
+  }
+
 
   "pairwiseAffinities" should "return the pairwise similarity p_i|j between datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
@@ -51,17 +72,17 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val metric = SquaredEuclideanDistanceMetric()
 
     val input = TsneHelpersTestSuite
-      .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
+      .readInput(getClass.getResource("/dense_input.csv").getPath, 28 * 28, env, Array(0, 1, 2))
 
     val knn = kNearestNeighbors(input, neighbors, metric)
     val results = pairwiseAffinities(knn, perplexity).collect()
     val expectedResults = TsneHelpersTestSuite.densePairwiseAffinitiesResults
 
-    results.size should equal (expectedResults.size)
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+        case Some(result) => result._3 should equal(expected._3 +- 1e-12)
         case None => fail("expected result not found")
       }
     }
@@ -74,15 +95,15 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val results = jointDistribution(pairwiseAffinities).collect()
     val expectedResults = TsneHelpersTestSuite.denseJointProbabilitiesResults
 
-    results.size should equal (expectedResults.size)
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+        case Some(result) => result._3 should equal(expected._3 +- 1e-12)
         case _ => fail("expected result not found")
       }
     }
-    results.map(_._3).sum should equal (1.0 +- 1e-12)
+    results.map(_._3).sum should equal(1.0 +- 1e-12)
   }
 
   "jointProbabilities" should "return the sparse symmetrized probability distribution p_ij over the datapoints" in {
@@ -91,16 +112,16 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val pairwiseAffinities = env.fromCollection(TsneHelpersTestSuite.sparsePairwiseAffinitiesResults)
     val results = jointDistribution(pairwiseAffinities).collect()
     val expectedResults = TsneHelpersTestSuite.sparseJointProbabilitiesResults
-    
-    results.size should equal (expectedResults.size)
+
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case Some(result) => result._3 should equal(expected._3 +- 1e-6)
         case _ => fail("expected result not found")
       }
     }
-    results.map(_._3).sum should equal (1.0 +- 1e-12)
+    results.map(_._3).sum should equal(1.0 +- 1e-12)
   }
 
   "SquaredEuclideanDistance" should "return the squared euclidean distance for all the datapoints" in {
@@ -109,14 +130,14 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val y = env.fromCollection(TsneHelpersTestSuite.yInit)
     val results = computeDistances(y, new SquaredEuclideanDistanceMetric).map(t => (t._1, t._2, t._3)).collect()
     val expectedResults = TsneHelpersTestSuite.distancesDenseWithoutVectorDiff
-    
+
     print(results)
-        
-    results.size should equal (expectedResults.size)
+
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+        case Some(result) => result._3 should equal(expected._3 +- 1e-12)
         case _ => fail("expected result not found")
       }
     }
@@ -129,14 +150,14 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
 
     val results = computeLowDimAffinities(distances).q.collect()
-    
+
     val expectedResults = TsneHelpersTestSuite.denseUnnormLowDimAffinitiesResults
 
-    results.size should equal (expectedResults.size)
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+        case Some(result) => result._3 should equal(expected._3 +- 1e-12)
         case _ => fail("expected result not found")
       }
     }
@@ -152,8 +173,8 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val expectedResult = TsneHelpersTestSuite.denseSumQ
 
-    results.size should equal (1)
-    results(0) should equal (expectedResult +- 1e-12)
+    results.size should equal(1)
+    results(0) should equal(expectedResult +- 1e-12)
   }
 
   "sumLowDimAffinities" should "return the sum over Q" in {
@@ -165,8 +186,8 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val expectedResult = TsneHelpersTestSuite.denseSumQ
 
-    results.size should equal (1)
-    results(0) should equal (expectedResult +- 1e-12)
+    results.size should equal(1)
+    results(0) should equal(expectedResult +- 1e-12)
   }
 
   "centerEmbedding" should "compute the centered embedding as LabeledVectors" in {
@@ -174,7 +195,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val nComponents = 2
 
-    val embeddingSeq = TsneHelpersTestSuite.centeringInput.map( g => {
+    val embeddingSeq = TsneHelpersTestSuite.centeringInput.map(g => {
 
       val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
       val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
@@ -188,11 +209,11 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val expectedResults = TsneHelpersTestSuite.centeringResults
 
-    results.size should equal (expectedResults.size)
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x.label == expected.label)
       result match {
-        case Some(result) => result.vector should equal (expected.vector)
+        case Some(result) => result.vector should equal(expected.vector)
         case _ => fail("expected result not found")
       }
     }
@@ -208,14 +229,14 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val results = gradient(jointDistribution, embedding, SquaredEuclideanDistanceMetric(), sumQ).collect()
 
     val expectedResults = TsneHelpersTestSuite.denseGradientResults
-    
-    results.size should equal (expectedResults.size)
+
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x.label == expected.label)
       result match {
         case Some(result) => {
-          for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-12)
+          for (i <- 0 until result.vector.size) {
+            result.vector(i) should equal(expected.vector(i) +- 1e-12)
           }
         }
         case _ => fail("expected result not found")
@@ -233,14 +254,14 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val oneVector = breeze.linalg.DenseVector.fill(nComponents, 1.0).fromBreeze
 
     val input = TsneHelpersTestSuite
-      .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
+      .readInput(getClass.getResource("/dense_input.csv").getPath, 28 * 28, env, Array(0, 1, 2))
 
     val results = initWorkingSet(input, nComponents, randomState).collect()
 
-    results.size should equal (input.count())
+    results.size should equal(input.count())
     for (result <- results) {
-      result._3 should equal (zeroVector)
-      result._4 should equal (oneVector)
+      result._3 should equal(zeroVector)
+      result._4 should equal(oneVector)
     }
   }
 
@@ -255,7 +276,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val initialEmbeddingSeq = TsneHelpersTestSuite.initialEmbedding
     val gradient = env.fromCollection(TsneHelpersTestSuite.denseGradientResults)
 
-    val workingSetSeq = initialEmbeddingSeq.map( g => {
+    val workingSetSeq = initialEmbeddingSeq.map(g => {
 
       val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
       val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
@@ -270,13 +291,13 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val expectedResults = TsneHelpersTestSuite.updatedEmbeddingResults
 
-    results.size should equal (expectedResults.size)
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x.label == expected.label)
       result match {
         case Some(result) => {
-          for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-9)
+          for (i <- 0 until result.vector.size) {
+            result.vector(i) should equal(expected.vector(i) +- 1e-9)
           }
         }
         case _ => fail("expected result not found")
@@ -297,7 +318,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val initialEmbeddingSeq = TsneHelpersTestSuite.initialEmbedding
 
-    val workingSetSeq = initialEmbeddingSeq.map( g => {
+    val workingSetSeq = initialEmbeddingSeq.map(g => {
 
       val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
       val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
@@ -312,13 +333,13 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val expectedResults = TsneHelpersTestSuite.updatedAndCentredEmbeddingResults
 
-    results.size should equal (expectedResults.size)
+    results.size should equal(expectedResults.size)
     for (expected <- expectedResults) {
       val result = results.find(x => x.label == expected.label)
       result match {
         case Some(result) => {
-          for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-9)
+          for (i <- 0 until result.vector.size) {
+            result.vector(i) should equal(expected.vector(i) +- 1e-9)
           }
         }
         case _ => fail("expected result not found")
@@ -329,15 +350,15 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
 object TsneHelpersTestSuite {
   val knnInput: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(4, List((0, 0.0),(1, 0.0),(2, 0.0),(3, 0.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(4, List((0, 1.0),(1, 1.0),(2, 1.0),(3, 1.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(4, List((0, 2.0),(1, 2.0),(2, 2.0),(3, 2.0)))),
-    LabeledVector(3.0, SparseVector.fromCOO(4, List((0, 3.0),(1, 3.0),(2, 3.0),(3, 3.0)))),
-    LabeledVector(4.0, SparseVector.fromCOO(4, List((0, 4.0),(1, 4.0),(2, 4.0),(3, 4.0)))),
-    LabeledVector(5.0, SparseVector.fromCOO(4, List((0, 5.0),(1, 5.0),(2, 5.0),(3, 5.0)))),
-    LabeledVector(6.0, SparseVector.fromCOO(4, List((0, 6.0),(1, 6.0),(2, 6.0),(3, 6.0)))),
-    LabeledVector(7.0, SparseVector.fromCOO(4, List((0, 7.0),(1, 7.0),(2, 7.0),(3, 7.0)))),
-    LabeledVector(8.0, SparseVector.fromCOO(4, List((0, 8.0),(1, 8.0),(2, 8.0),(3, 8.0))))
+    LabeledVector(0.0, SparseVector.fromCOO(4, List((0, 0.0), (1, 0.0), (2, 0.0), (3, 0.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(4, List((0, 1.0), (1, 1.0), (2, 1.0), (3, 1.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(4, List((0, 2.0), (1, 2.0), (2, 2.0), (3, 2.0)))),
+    LabeledVector(3.0, SparseVector.fromCOO(4, List((0, 3.0), (1, 3.0), (2, 3.0), (3, 3.0)))),
+    LabeledVector(4.0, SparseVector.fromCOO(4, List((0, 4.0), (1, 4.0), (2, 4.0), (3, 4.0)))),
+    LabeledVector(5.0, SparseVector.fromCOO(4, List((0, 5.0), (1, 5.0), (2, 5.0), (3, 5.0)))),
+    LabeledVector(6.0, SparseVector.fromCOO(4, List((0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0)))),
+    LabeledVector(7.0, SparseVector.fromCOO(4, List((0, 7.0), (1, 7.0), (2, 7.0), (3, 7.0)))),
+    LabeledVector(8.0, SparseVector.fromCOO(4, List((0, 8.0), (1, 8.0), (2, 8.0), (3, 8.0))))
   ).toSeq
 
   // result for k = 2
@@ -442,52 +463,52 @@ object TsneHelpersTestSuite {
   ).toSeq
 
   val centeringInput: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, -2.0),(1, 4.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -6.0),(1, 4.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 2.0),(1, -8.0))))
+    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, -2.0), (1, 4.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -6.0), (1, 4.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 2.0), (1, -8.0))))
   ).toSeq
 
   val centeringResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, 0.0),(1, 4.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -4.0),(1, 4.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 4.0),(1, -8.0))))
+    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, 0.0), (1, 4.0)))),
+    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -4.0), (1, 4.0)))),
+    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 4.0), (1, -8.0))))
   ).toSeq
 
   // C++ implementation
 
   val sparsePairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 5L, 0.999490),(0L, 4L, 0.000000),(1L, 5L, 0.999490),(1L, 6L, 0.000000),
-    (2L, 3L, 0.999490),(2L, 4L, 0.000000),(3L, 4L, 0.499252),(3L, 2L, 0.499252),
-    (4L, 3L, 0.499252),(4L, 5L, 0.499252),(5L, 6L, 0.499252),(5L, 4L, 0.499252),
-    (6L, 5L, 0.499252),(6L, 7L, 0.499252),(7L, 9L, 0.999490),(7L, 6L, 0.000000),
-    (8L, 9L, 0.999490),(8L, 7L, 0.000000),(9L, 8L, 0.999490),(9L, 7L, 0.000000),
-    (10L, 11L, 0.999490),(10L, 8L, 0.000000),(11L, 10L, 0.999490),(11L, 8L, 0.000000)
+    (0L, 5L, 0.999490), (0L, 4L, 0.000000), (1L, 5L, 0.999490), (1L, 6L, 0.000000),
+    (2L, 3L, 0.999490), (2L, 4L, 0.000000), (3L, 4L, 0.499252), (3L, 2L, 0.499252),
+    (4L, 3L, 0.499252), (4L, 5L, 0.499252), (5L, 6L, 0.499252), (5L, 4L, 0.499252),
+    (6L, 5L, 0.499252), (6L, 7L, 0.499252), (7L, 9L, 0.999490), (7L, 6L, 0.000000),
+    (8L, 9L, 0.999490), (8L, 7L, 0.000000), (9L, 8L, 0.999490), (9L, 7L, 0.000000),
+    (10L, 11L, 0.999490), (10L, 8L, 0.000000), (11L, 10L, 0.999490), (11L, 8L, 0.000000)
   ).toSeq
 
   val sparseJointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 5L, 0.041680),(0L, 4L, 0.000000),(1L, 5L, 0.041680),(1L, 6L, 0.000000),
-    (2L, 3L, 0.062500),(2L, 4L, 0.000000),(3L, 2L, 0.062500),(3L, 4L, 0.041639),
-    (4L, 0L, 0.000000),(4L, 2L, 0.000000),(4L, 3L, 0.041639),(4L, 5L, 0.041639),
-    (5L, 0L, 0.041680),(5L, 1L, 0.041680),(5L, 4L, 0.041639),(5L, 6L, 0.041639),
-    (6L, 1L, 0.000000),(6L, 5L, 0.041639),(6L, 7L, 0.020820),(7L, 6L, 0.020820),
-    (7L, 9L, 0.041680),(7L, 8L, 0.000000),(8L, 9L, 0.083361),(8L, 7L, 0.000000),
-    (8L, 10L, 0.000000),(8L, 11L, 0.000000),(9L, 7L, 0.041680),(9L, 8L, 0.083361),
-    (10L, 11L, 0.083361),(10L, 8L, 0.000000),(11L, 10L, 0.083361),(11L, 8L, 0.000000)
+    (0L, 5L, 0.041680), (0L, 4L, 0.000000), (1L, 5L, 0.041680), (1L, 6L, 0.000000),
+    (2L, 3L, 0.062500), (2L, 4L, 0.000000), (3L, 2L, 0.062500), (3L, 4L, 0.041639),
+    (4L, 0L, 0.000000), (4L, 2L, 0.000000), (4L, 3L, 0.041639), (4L, 5L, 0.041639),
+    (5L, 0L, 0.041680), (5L, 1L, 0.041680), (5L, 4L, 0.041639), (5L, 6L, 0.041639),
+    (6L, 1L, 0.000000), (6L, 5L, 0.041639), (6L, 7L, 0.020820), (7L, 6L, 0.020820),
+    (7L, 9L, 0.041680), (7L, 8L, 0.000000), (8L, 9L, 0.083361), (8L, 7L, 0.000000),
+    (8L, 10L, 0.000000), (8L, 11L, 0.000000), (9L, 7L, 0.041680), (9L, 8L, 0.083361),
+    (10L, 11L, 0.083361), (10L, 8L, 0.000000), (11L, 10L, 0.083361), (11L, 8L, 0.000000)
   )
 
   val yInit: Seq[LabeledVector] = List(
-    LabeledVector(0, new DenseVector(Array(0.00011122716070838681,0.00006080563805333057))),
-    LabeledVector(1, new DenseVector(Array(-0.00007120823209735604,-0.00017189452155069314))),
-    LabeledVector(2, new DenseVector(Array(-0.00004000535669646060,-0.00022717203149772645))),
-    LabeledVector(3, new DenseVector(Array(0.00008663309627528085,-0.00010325765463991235))),
-    LabeledVector(4, new DenseVector(Array(-0.00003582032920213515,-0.00011138115570423478))),
-    LabeledVector(5, new DenseVector(Array(0.00000474475662365405,0.00008448473882524468))),
-    LabeledVector(6, new DenseVector(Array(0.00022241394002237897,-0.00000064174153521060))),
-    LabeledVector(7, new DenseVector(Array(-0.00007498357621804678,0.00001542291223429679))),
-    LabeledVector(8, new DenseVector(Array(-0.00002279772806102704,-0.00013284059681958318))),
-    LabeledVector(9, new DenseVector(Array(0.00000541931482402651,-0.00010620372323138086))),
-    LabeledVector(10, new DenseVector(Array(0.00007868893550591110,-0.00000695497272360187))),
-    LabeledVector(11, new DenseVector(Array(-0.00017049612819062857,-0.00006410186066559613)))
+    LabeledVector(0, new DenseVector(Array(0.00011122716070838681, 0.00006080563805333057))),
+    LabeledVector(1, new DenseVector(Array(-0.00007120823209735604, -0.00017189452155069314))),
+    LabeledVector(2, new DenseVector(Array(-0.00004000535669646060, -0.00022717203149772645))),
+    LabeledVector(3, new DenseVector(Array(0.00008663309627528085, -0.00010325765463991235))),
+    LabeledVector(4, new DenseVector(Array(-0.00003582032920213515, -0.00011138115570423478))),
+    LabeledVector(5, new DenseVector(Array(0.00000474475662365405, 0.00008448473882524468))),
+    LabeledVector(6, new DenseVector(Array(0.00022241394002237897, -0.00000064174153521060))),
+    LabeledVector(7, new DenseVector(Array(-0.00007498357621804678, 0.00001542291223429679))),
+    LabeledVector(8, new DenseVector(Array(-0.00002279772806102704, -0.00013284059681958318))),
+    LabeledVector(9, new DenseVector(Array(0.00000541931482402651, -0.00010620372323138086))),
+    LabeledVector(10, new DenseVector(Array(0.00007868893550591110, -0.00000695497272360187))),
+    LabeledVector(11, new DenseVector(Array(-0.00017049612819062857, -0.00006410186066559613)))
   )
 
   //calculated by c++ program

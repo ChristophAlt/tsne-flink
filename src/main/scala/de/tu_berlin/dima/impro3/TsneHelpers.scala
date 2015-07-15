@@ -356,10 +356,11 @@ object TsneHelpers {
   //new KNN implemtation
   def knnDescent(input: DataSet[LabeledVector], maxIterations: Int = 10, numberNodes: Int = 10,
                  metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
-    val r = new Random()
+
     //Random distances at the beginning
     val randomizedData: DataSet[(Int, LabeledVector)] = input.flatMap(vector => {
       val ls = scala.collection.mutable.ArrayBuffer.empty[(Int, LabeledVector)]
+      val r = new Random()
       for (i <- 0 until (numberNodes)) {
         ls.append((r.nextInt(20), vector))
       }
@@ -376,6 +377,7 @@ object TsneHelpers {
       val list = nodes.toList
       val neighbors = scala.collection.mutable.ArrayBuffer.empty[(LabeledVector, Array[(LabeledVector, Double)])]
       for (a <- nodes) {
+        val r = new Random()
         val tmp = new BoundedPriorityQueue[(LabeledVector, Double)](numberNodes)(tupleOrdering)
         for (i <- 0 until numberNodes) {
           tmp += ((list(r.nextInt(list.size)), Double.MaxValue))
@@ -408,7 +410,7 @@ object TsneHelpers {
 
 
   private def iterateGraph(input: DataSet[(LabeledVector, Array[(LabeledVector, Double)])], nodesSize: Int = 10,
-                           distanceMetric: DistanceMetric ): DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = {
+                           distanceMetric: DistanceMetric): DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = {
     //emit vectors
     val graph: DataSet[(LabeledVector, LabeledVector)] = input.flatMap(element => {
       val iter = element._2.iterator
@@ -436,13 +438,12 @@ object TsneHelpers {
         ls.append(element.next()._2)
       }
       val nodes = ls.toArray
-      val listNeighbors = scala.collection.mutable.ArrayBuffer.empty[(LabeledVector, Array[(LabeledVector, Double)])]
       for (root <- nodes) {
-        val neighbors = new BoundedPriorityQueue[(LabeledVector, Double)](nodesSize)(tupleOrdering)
+        var neighbors = new BoundedPriorityQueue[(LabeledVector, Double)](nodesSize)(tupleOrdering)
         for (other <- nodes) {
           other.label match {
             case root.label => ();
-            case _ => neighbors += ((other, distanceMetric.distance(other.vector, root.vector)))
+            case _ => neighbors = neighbors += ((other, distanceMetric.distance(other.vector, root.vector)))
           }
         }
         collector.collect((root, neighbors.toArray))
