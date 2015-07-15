@@ -53,7 +53,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
 
-    val results = knnDescent(input, 10, 10, metric).collect()
+    val results = knnDescent(input, k = neighbors, metric = metric).collect()
     val expectedResults = TsneHelpersTestSuite.knnResults
 
     results.size should equal(expectedResults.size)

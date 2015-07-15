@@ -350,58 +350,64 @@ object TsneHelpers {
 
 
   val tupleOrdering = new Ordering[(LabeledVector, Double)] {
-    override def compare(x: (LabeledVector, Double), y: (LabeledVector, Double)): Int = x._2 compare y._2
+    override def compare(x: (LabeledVector, Double), y: (LabeledVector, Double)): Int = y._2 compare x._2
   }
 
   //new KNN implemtation
-  def knnDescent(input: DataSet[LabeledVector], maxIterations: Int = 10, numberNodes: Int = 10,
+  def knnDescent(input: DataSet[LabeledVector], maxIterations: Int = 10, k: Int = 10,
                  metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
 
     //Random distances at the beginning
     val randomizedData: DataSet[(Int, LabeledVector)] = input.flatMap(vector => {
       val ls = scala.collection.mutable.ArrayBuffer.empty[(Int, LabeledVector)]
       val r = new Random()
-      for (i <- 0 until (numberNodes)) {
+      for (i <- 0 until (k)) {
         ls.append((r.nextInt(20), vector))
       }
       ls
     }
     )
-
+    println("Init")
     //Random Intialisation of the graph
-    val random_nl: DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = randomizedData.mapPartition(iter => {
+    val random_nl: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = randomizedData.mapPartition(iter => {
       val nodes = scala.collection.mutable.ListBuffer.empty[(LabeledVector)]
       while (iter.hasNext) {
         nodes.append(iter.next()._2)
       }
       val list = nodes.toList
-      val neighbors = scala.collection.mutable.ArrayBuffer.empty[(LabeledVector, Array[(LabeledVector, Double)])]
+      val neighbors = scala.collection.mutable.ArrayBuffer.empty[(Long, LabeledVector, Array[(LabeledVector, Double)])]
       for (a <- nodes) {
         val r = new Random()
-        val tmp = new BoundedPriorityQueue[(LabeledVector, Double)](numberNodes)(tupleOrdering)
-        for (i <- 0 until numberNodes) {
+        val tmp = new BoundedPriorityQueue[(LabeledVector, Double)](k)(tupleOrdering)
+        for (i <- 0 until k) {
           tmp += ((list(r.nextInt(list.size)), Double.MaxValue))
         }
-        neighbors.append((a, tmp.toArray))
+        neighbors.append((a.label.toLong, a, tmp.toArray))
       }
       neighbors
     })
 
-    val merged: DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = random_nl.join(random_nl).where(0).equalTo(0) {
+    val merged: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = random_nl.join(random_nl).where(0
+    ).equalTo(0) {
       (left, right) => {
         //muss nicht hiermit gemacht werden wichtig ist nur die größe
-        var joined = new BoundedPriorityQueue[(LabeledVector, Double)](numberNodes)(tupleOrdering)
-        joined = joined ++= left._2
-        joined = joined ++= right._2
-        (left._1, joined.toArray)
+        var joined = new BoundedPriorityQueue[(LabeledVector, Double)](k)(tupleOrdering)
+        joined = joined ++= left._3
+        joined = joined ++= right._3
+        (left._1, left._2, joined.toArray)
       }
     }
 
-    val preResult: DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = merged.iterate(maxIterations) { merged => iterateGraph(merged, numberNodes, metric) }
+
+    println("Join Finished")
+    var preResult: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = iterateGraph(merged, k, metric)
+    for (i <- 1 until maxIterations) {
+      preResult = iterateGraph(preResult, k, metric)
+    }
 
     val result = preResult.flatMap((element, collector: Collector[(Long, Long, Double)]) => {
-      for (a <- element._2) {
-        collector.collect(element._1.label.toLong, a._1.label.toLong, a._2)
+      for (a <- element._3) {
+        collector.collect(element._1, a._1.label.toLong, a._2)
       }
     })
 
@@ -409,56 +415,57 @@ object TsneHelpers {
   }
 
 
-  private def iterateGraph(input: DataSet[(LabeledVector, Array[(LabeledVector, Double)])], nodesSize: Int = 10,
-                           distanceMetric: DistanceMetric): DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = {
+  private def iterateGraph(input: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])], numberN: Int = 10,
+                           distanceMetric: DistanceMetric): DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = {
     //emit vectors
-    val graph: DataSet[(LabeledVector, LabeledVector)] = input.flatMap(element => {
-      val iter = element._2.iterator
+    println("Starting Graph Phase");
+    val graph: DataSet[(Long, LabeledVector, LabeledVector)] = input.flatMap(element => {
+      val iter = element._3.iterator
       val neighbors = scala.collection.mutable.ArrayBuffer.empty[LabeledVector]
       while (iter.hasNext) {
         neighbors.append(iter.next()._1)
       }
       val neighborsList = neighbors.toArray
-      val ls = scala.collection.mutable.ArrayBuffer.empty[(LabeledVector, LabeledVector)]
+      val ls = scala.collection.mutable.ArrayBuffer.empty[(Long, LabeledVector, LabeledVector)]
       for (a <- neighborsList) {
-        ls.append((a, element._1))
-        ls.append((element._1, a))
+        ls.append((element._1, a, element._2))
+        ls.append((element._1, element._2, a))
       }
       ls
     })
 
     //Get the closest neighbors
-    val explodedGraph: DataSet[(LabeledVector, Array[(LabeledVector, Double)])]
+    val explodedGraph: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])]
     = graph.groupBy(0).
-      reduceGroup((element, collector: Collector[(LabeledVector, Array[(LabeledVector, Double)])]) => {
+      reduceGroup((element, collector: Collector[(Long, LabeledVector, Array[(LabeledVector, Double)])]) => {
       val ls = scala.collection.mutable.ArrayBuffer.empty[LabeledVector]
       val first = element.next()
-      ls.appendAll(List(first._1, first._2))
+      ls.appendAll(List(first._2, first._3))
       while (element.hasNext) {
         ls.append(element.next()._2)
       }
       val nodes = ls.toArray
       for (root <- nodes) {
-        var neighbors = new BoundedPriorityQueue[(LabeledVector, Double)](nodesSize)(tupleOrdering)
+        var neighbors = new BoundedPriorityQueue[(LabeledVector, Double)](numberN)(tupleOrdering)
         for (other <- nodes) {
           other.label match {
             case root.label => ();
             case _ => neighbors = neighbors += ((other, distanceMetric.distance(other.vector, root.vector)))
           }
         }
-        collector.collect((root, neighbors.toArray))
+        collector.collect((root.label.toLong, root, neighbors.toArray))
       }
     }
       )
 
-    val result: DataSet[(LabeledVector, Array[(LabeledVector, Double)])] = explodedGraph.groupBy(0)
-      .reduceGroup((element, collector: Collector[(LabeledVector, Array[(LabeledVector, Double)])]) => {
-      var ls = new BoundedPriorityQueue[(LabeledVector, Double)](nodesSize)(tupleOrdering)
-      val vr = element.next()._1
+    val result: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = explodedGraph.groupBy(0)
+      .reduceGroup((element, collector: Collector[(Long, LabeledVector, Array[(LabeledVector, Double)])]) => {
+      var ls = new BoundedPriorityQueue[(LabeledVector, Double)](numberN)(tupleOrdering)
+      val vr = element.next()._2
       for (a <- element) {
-        ls = ls ++= a._2
+        ls = ls ++= a._3
       }
-      collector.collect((vr, ls.toArray))
+      collector.collect((vr.label.toLong, vr, ls.toArray))
     })
 
     return result;
