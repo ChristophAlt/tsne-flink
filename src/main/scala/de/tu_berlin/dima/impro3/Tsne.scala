@@ -26,7 +26,6 @@ import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.SparseVector
 import org.apache.flink.ml.metrics.distances._
 
-
 object Tsne {
 
   def main(args: Array[String]) {
@@ -43,7 +42,7 @@ object Tsne {
     val perplexity = parameters.getDouble("perplexity", 30.0)
     val nComponents = parameters.getLong("nComponents", 2)
     val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
-    val learningRate = parameters.getDouble("learningRate", 1000)
+    val learningRate = parameters.getDouble("learningRate", 1000.0)
     val iterations = parameters.getLong("iterations", 300)
 
     val randomState = parameters.getLong("randomState", 0)
@@ -67,9 +66,16 @@ object Tsne {
     env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
       .groupBy(_._1).reduceGroup(
         elements => {
-          val elementsIterable = elements.toIterable
-          val entries = elementsIterable.map(x => (x._2, x._3))
-          LabeledVector(elementsIterable.head._1.toDouble, SparseVector.fromCOO(dimension, entries))
+          val first = elements.next
+
+          var entries = (first._2, first._3) :: Nil
+          while (elements.hasNext) {
+            val e = elements.next
+            entries = (e._2, e._3) :: entries
+          }
+          //val elementsIterable = elements.toIterable
+          //val entries = elementsIterable.map(x => (x._2, x._3))
+          LabeledVector(first._1, SparseVector.fromCOO(dimension, entries))
     })
   }
 
