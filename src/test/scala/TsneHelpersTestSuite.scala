@@ -143,40 +143,11 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     }
   }
 
-  "lowDimAffinities" should "return the unnormalized low dim distribution Q" in {
-    val env = ExecutionEnvironment.getExecutionEnvironment
-
-    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
-    val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
-
-    val results = computeLowDimAffinities(distances).q.collect()
-
-    val expectedResults = TsneHelpersTestSuite.denseUnnormLowDimAffinitiesResults
 
     results.size should equal(expectedResults.size)
-    for (expected <- expectedResults) {
-      val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
-      result match {
         case Some(result) => result._3 should equal(expected._3 +- 1e-12)
-        case _ => fail("expected result not found")
-      }
-    }
-  }
-
-  "lowDimAffinities" should "return the sum over Q" in {
-    val env = ExecutionEnvironment.getExecutionEnvironment
-
-    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
-    val distances = computeDistances(embedding, SquaredEuclideanDistanceMetric())
-
-    val results = computeLowDimAffinities(distances).sumQ.collect()
-
-    val expectedResult = TsneHelpersTestSuite.denseSumQ
-
     results.size should equal(1)
     results(0) should equal(expectedResult +- 1e-12)
-  }
-
   "sumLowDimAffinities" should "return the sum over Q" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 

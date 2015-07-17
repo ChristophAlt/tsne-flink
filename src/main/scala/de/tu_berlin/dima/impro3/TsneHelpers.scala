@@ -22,19 +22,19 @@ import org.apache.flink.api.common.functions.RichMapFunction
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
+import org.apache.flink.ml._
 import org.apache.flink.ml.common.LabeledVector
+import org.apache.flink.ml.math.Breeze._
 import org.apache.flink.ml.math.{DenseVector, Vector}
 import org.apache.flink.ml.metrics.distances.{SquaredEuclideanDistanceMetric, DistanceMetric}
 import org.apache.flink.util.Collector
-import org.apache.flink.ml._
-import org.apache.flink.ml.math.Breeze._
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.math._
 import scala.util.Random
-import scala.collection.JavaConverters._
 import org.apache.spark.util.BoundedPriorityQueue
+import scala.collection.JavaConverters._
 
 
 object TsneHelpers {
@@ -154,37 +154,11 @@ object TsneHelpers {
       .reduce((x, y) => x + y)
   }
 
-  // Compute Q-matrix and normalization sum
   def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, Vector)]): {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[Double]} = {
-    // unnormalized q_ij
-    val unnormAffinities = distances
-      .map { d =>
-      // i     j   1 / (1 + dij)
-      (d._1, d._2, 1 / (1 + d._3))
-    }
-
-    val sumOverAllAffinities = unnormAffinities.sum(2).map(x => x._3)
-
-    new {
-      val q = unnormAffinities
-      val sumQ = sumOverAllAffinities
-    }
-  }
-
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
                metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
   DataSet[LabeledVector] = {
     // this is not the optimized version
-    /*highDimAffinities
-      .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
-      //                i           j       (p - (q / sum(q)) * q
-      (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - max(pQ._2._3 / sumQ, 1e-12)) * pQ._2._3)
-
-    }.join(distances).where(0, 1).equalTo(0, 1) {
-    //                             ((p -  q)* num) * (yi -yj)      
-      (mul, d) => (mul._1, mul._2, (mul._3         * d._4.asBreeze).fromBreeze)
-    }.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2, (v1._3.asBreeze + v2._3.asBreeze).fromBreeze))
-      .map(g => LabeledVector(g._1, g._3))*/
     // compute attracting forces
     val attrForces = highDimAffinities
       .map(new RichMapFunction[(Long, Long, Double), (Long, Vector)] {
@@ -297,7 +271,6 @@ object TsneHelpers {
         val distances = computeDistances(currentEmbedding, metric)
         // Compute Q-matrix and normalization sum
         //val results = computeLowDimAffinities(distances)
-
         //val lowDimAffinities = results.q
         //val sumAffinities = results.sumQ
         val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)

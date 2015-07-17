@@ -29,7 +29,6 @@ import org.apache.flink.ml.metrics.distances._
 
 import scala.util.Try
 
-
 object Tsne {
 
   def main(args: Array[String]) {
@@ -46,7 +45,7 @@ object Tsne {
     val perplexity = parameters.getDouble("perplexity", 30.0)
     val nComponents = parameters.getInt("nComponents", 2)
     val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
-    val learningRate = parameters.getDouble("learningRate", 1000)
+    val learningRate = parameters.getDouble("learningRate", 1000.0)
     val iterations = parameters.getInt("iterations", 300)
 
     val randomState = parameters.getInt("randomState", 0)
@@ -75,7 +74,7 @@ object Tsne {
         elements => {
           val elementsIterable = elements.toIterable
           val entries = elementsIterable.map(x => (x._2, x._3))
-          LabeledVector(elementsIterable.head._1.toDouble, SparseVector.fromCOO(dimension, entries))
+          LabeledVector(elementsIterable.head._1, SparseVector.fromCOO(dimension, entries))
         })
   }
 
@@ -87,7 +86,7 @@ object Tsne {
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
-
+    
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
     var knn: DataSet[(Long, Long, Double)] = null
     if (bruteForce) {
@@ -102,7 +101,6 @@ object Tsne {
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
 
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
