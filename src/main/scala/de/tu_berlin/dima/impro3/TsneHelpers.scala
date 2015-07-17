@@ -367,7 +367,7 @@ object TsneHelpers {
       ls
     }
     )
-    println("Init")
+
     //Random Intialisation of the graph
     val random_nl: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = randomizedData.mapPartition(iter => {
       val nodes = scala.collection.mutable.ListBuffer.empty[(LabeledVector)]
@@ -392,16 +392,16 @@ object TsneHelpers {
       (left, right) => {
         //muss nicht hiermit gemacht werden wichtig ist nur die größe
         var joined = new BoundedPriorityQueue[(LabeledVector, Double)](k)(tupleOrdering)
-        joined = joined ++= left._3
-        joined = joined ++= right._3
+        var distinct = (left._3 ++ right._3).toSet
+        joined = joined ++= distinct
         (left._1, left._2, joined.toArray)
       }
     }
 
 
-    println("Join Finished")
+
     val preResult = merged.iterate(maxIterations) {
-      preResult => iterateGraph(merged, k, metric)
+      merged => iterateGraph(merged, k, metric)
     }
 
     val result: DataSet[(Long, Long, Double)] = preResult.flatMap((element, collector: Collector[(Long, Long, Double)]) => {
@@ -416,8 +416,7 @@ object TsneHelpers {
 
   private def iterateGraph(input: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])], numberN: Int = 10,
                            distanceMetric: DistanceMetric): DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = {
-    //emit vectors
-    println("Starting Graph Phase");
+
     val graph: DataSet[(Long, LabeledVector, LabeledVector)] = input.flatMap(element => {
       val iter = element._3.iterator
       val neighbors = scala.collection.mutable.ArrayBuffer.empty[LabeledVector]

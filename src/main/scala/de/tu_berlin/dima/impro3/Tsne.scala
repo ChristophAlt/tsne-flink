@@ -94,17 +94,8 @@ object Tsne {
       knn = kNearestNeighbors(input, neighbors, metric);
     }
     else {
-
-      val flinkKnn = KNN()
-        .setK(neighbors)
-        .setDistanceMetric(metric)
-
-      flinkKnn.fit(input)
-      //
-      // Problem : Wie machen wir das mit den indexes ?
-      knn = flinkKnn.predict(input)
-      //    val predictionDS:DataSet[(Vector, Array[Vector])] = knn.predict(train)
-
+      // Graph algorithm
+      knn = knnDescent(input, k = neighbors, metric = metric)
     }
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)

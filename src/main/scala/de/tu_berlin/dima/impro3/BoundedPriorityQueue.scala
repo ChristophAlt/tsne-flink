@@ -49,10 +49,12 @@ class BoundedPriorityQueue[A](maxSize: Int)(implicit ord: Ordering[A])
   }
 
   override def +=(elem: A): this.type = {
-    if (size < maxSize) {
-      underlying.offer(elem)
-    } else {
-      maybeReplaceLowest(elem)
+    if (!underlying.contains(elem)) {
+      if (size < maxSize) {
+        underlying.offer(elem)
+      } else {
+        maybeReplaceLowest(elem)
+      }
     }
     this
   }
