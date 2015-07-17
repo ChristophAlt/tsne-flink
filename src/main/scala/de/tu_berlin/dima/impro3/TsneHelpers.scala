@@ -151,24 +151,6 @@ object TsneHelpers {
     .reduce((x, y) => x + y)
   }
 
-  // Compute Q-matrix and normalization sum
-  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, Vector)]):
-    {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[Double]} = {
-    // unnormalized q_ij
-    val unnormAffinities = distances
-      .map { d =>
-      // i     j   1 / (1 + dij)
-      (d._1, d._2, 1 / (1 + d._3))
-    }
-
-    val sumOverAllAffinities = unnormAffinities.sum(2).map(x => x._3)
-
-    new {
-      val q = unnormAffinities
-      val sumQ = sumOverAllAffinities
-    }
-  }
-
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
                metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
     DataSet[LabeledVector] = {
@@ -284,10 +266,6 @@ object TsneHelpers {
       // compute pairwise differences yi - yj
       val distances = computeDistances(currentEmbedding, metric)
       // Compute Q-matrix and normalization sum
-      //val results = computeLowDimAffinities(distances)
-
-      //val lowDimAffinities = results.q
-      //val sumAffinities = results.sumQ
       val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
 
       val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities)

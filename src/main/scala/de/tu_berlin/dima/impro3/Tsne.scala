@@ -66,16 +66,9 @@ object Tsne {
     env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
       .groupBy(_._1).reduceGroup(
         elements => {
-          val first = elements.next
-
-          var entries = (first._2, first._3) :: Nil
-          while (elements.hasNext) {
-            val e = elements.next
-            entries = (e._2, e._3) :: entries
-          }
-          //val elementsIterable = elements.toIterable
-          //val entries = elementsIterable.map(x => (x._2, x._3))
-          LabeledVector(first._1, SparseVector.fromCOO(dimension, entries))
+          val elementsIterable = elements.toIterable
+          val entries = elementsIterable.map(x => (x._2, x._3))
+          LabeledVector(elementsIterable.head._1, SparseVector.fromCOO(dimension, entries))
     })
   }
 
@@ -87,15 +80,15 @@ object Tsne {
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
-    
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
+    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
+
     val knn = kNearestNeighbors(input, neighbors, metric)
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
 
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
