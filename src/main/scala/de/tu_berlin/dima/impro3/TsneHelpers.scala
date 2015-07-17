@@ -154,7 +154,7 @@ object TsneHelpers {
       .reduce((x, y) => x + y)
   }
 
-  def computeLowDimAffinities(distances: DataSet[(Long, Long, Double, Vector)]): {val q: DataSet[(Long, Long, Double)]; val sumQ: DataSet[Double]} = {
+
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
                metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
   DataSet[LabeledVector] = {
@@ -371,8 +371,6 @@ object TsneHelpers {
       }
     }
 
-
-
     val preResult = merged.iterate(maxIterations) {
       merged => iterateGraph(merged, k, metric)
     }
@@ -382,7 +380,6 @@ object TsneHelpers {
         collector.collect(element._1, a._1.label.toLong, a._2)
       }
     })
-
     result
   }
 
@@ -402,8 +399,7 @@ object TsneHelpers {
         ls.append((element._1, a, element._2))
         ls.append((element._1, element._2, a))
       }
-      ls
-    })
+      ls})
 
     //Get the closest neighbors
     val explodedGraph: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])]
@@ -426,8 +422,7 @@ object TsneHelpers {
         }
         collector.collect((root.label.toLong, root, neighbors.toArray))
       }
-    }
-      )
+    })
 
     val result: DataSet[(Long, LabeledVector, Array[(LabeledVector, Double)])] = explodedGraph.groupBy(0)
       .reduceGroup((element, collector: Collector[(Long, LabeledVector, Array[(LabeledVector, Double)])]) => {
