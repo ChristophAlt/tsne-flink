@@ -143,11 +143,10 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     }
   }
 
-
-    results.size should equal(expectedResults.size)
-        case Some(result) => result._3 should equal(expected._3 +- 1e-12)
-    results.size should equal(1)
-    results(0) should equal(expectedResult +- 1e-12)
+    results.size should equal (expectedResults.size)
+        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+    results.size should equal (1)
+    results(0) should equal (expectedResult +- 1e-12)
   "sumLowDimAffinities" should "return the sum over Q" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 

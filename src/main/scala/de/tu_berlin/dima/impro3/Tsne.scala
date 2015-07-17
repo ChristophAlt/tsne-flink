@@ -41,7 +41,7 @@ object Tsne {
 
     val inputDimension = parameters.getRequired("dimension").toInt
 
-    val metric = SquaredEuclideanDistanceMetric()
+    val metric = parameters.get("metric", "sqeuclidean")
     val perplexity = parameters.getDouble("perplexity", 30.0)
     val nComponents = parameters.getInt("nComponents", 2)
     val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
@@ -59,7 +59,7 @@ object Tsne {
 
     val input = readInput(inputPath, inputDimension, env, Array(0, 1, 2))
 
-    val result = computeEmbedding(env, input, metric, perplexity, inputDimension, nComponents, learningRate, iterations,
+    val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
       randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, bruteForce)
 
     result.map(x => (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode = WriteMode.OVERWRITE)
@@ -78,6 +78,15 @@ object Tsne {
         })
   }
 
+  private def getMetric(metric: String): DistanceMetric = {
+    metric match {
+      case "sqeucledian" => SquaredEuclideanDistanceMetric()
+      case "eucledian" => EuclideanDistanceMetric()
+      case "cosine" => CosineDistanceMetric()
+      case _ => throw new IllegalArgumentException(s"Metric '$metric' not defined")
+    }
+  }
+
   private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[LabeledVector], metric: DistanceMetric,
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
@@ -86,7 +95,6 @@ object Tsne {
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
-    
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
     var knn: DataSet[(Long, Long, Double)] = null
     if (bruteForce) {

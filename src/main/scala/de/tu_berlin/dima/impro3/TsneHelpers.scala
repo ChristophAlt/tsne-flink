@@ -154,7 +154,6 @@ object TsneHelpers {
       .reduce((x, y) => x + y)
   }
 
-
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
                metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
   DataSet[LabeledVector] = {
