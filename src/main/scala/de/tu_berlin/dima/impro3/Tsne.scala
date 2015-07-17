@@ -81,15 +81,15 @@ object Tsne {
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
-    
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
+    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
+
     val knn = kNearestNeighbors(input, neighbors, metric)
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 
     val jntDistribution = jointDistribution(pwAffinities)
 
-    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
 
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
