@@ -18,7 +18,7 @@
 
 package de.tu_berlin.dima.impro3
 
-import org.apache.flink.api.common.functions.RichMapFunction
+import org.apache.flink.api.common.functions.{RichGroupReduceFunction, RichMapFunction}
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
@@ -154,17 +154,6 @@ object TsneHelpers {
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
                metric: DistanceMetric, sumOverAllAffinities: DataSet[Double]):
     DataSet[LabeledVector] = {
-    // this is not the optimized version
-    /*highDimAffinities
-      .join(lowDimAffinities).where(0, 1).equalTo(0, 1).mapWithBcVariable(sumOverAllAffinities) {
-      //                i           j       (p - (q / sum(q)) * q
-      (pQ, sumQ) => (pQ._1._1, pQ._1._2, (pQ._1._3 - max(pQ._2._3 / sumQ, 1e-12)) * pQ._2._3)
-
-    }.join(distances).where(0, 1).equalTo(0, 1) {
-    //                             ((p -  q)* num) * (yi -yj)      
-      (mul, d) => (mul._1, mul._2, (mul._3         * d._4.asBreeze).fromBreeze)
-    }.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2, (v1._3.asBreeze + v2._3.asBreeze).fromBreeze))
-      .map(g => LabeledVector(g._1, g._3))*/
     // compute attracting forces
     val attrForces = highDimAffinities
       .map(new RichMapFunction[(Long, Long, Double), (Long, Vector)] {
@@ -188,35 +177,79 @@ object TsneHelpers {
     }).withBroadcastSet(embedding, "embedding")
       .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
 
+    // find xMin, xMax, yMin and yMax, as well as meanX and meanY
+    val boundaryAndMean = embedding.map(x => (x.vector(0), x.vector(0), x.vector(1), x.vector(1), x.vector(0), x.vector(1), 1))
+      .reduce((x, y) => (min(x._1, y._1), max(x._2, y._2), min(x._3, y._3), max(x._4, y._4), x._5 + y._5, x._6 + y._6, x._7 + y._7))
+
     // compute repulsive forces
-    val repForces = embedding
-      .map(new RichMapFunction[LabeledVector, (Long, Vector)] {
-      private var embedding: Traversable[LabeledVector] = null
+    val tree = embedding
+      .reduceGroup(new RichGroupReduceFunction[LabeledVector, QuadTree] {
+      private var boundaryAndMean: (Double, Double, Double, Double, Double, Double, Int) = null
+
+      override def open(parameters: Configuration) {
+        boundaryAndMean = getRuntimeContext
+          .getBroadcastVariable[(Double, Double, Double, Double, Double, Double, Int)]("boundaryAndMean").get(0)
+      }
+
+      def reduce(embedding: java.lang.Iterable[LabeledVector],
+                  out: Collector[QuadTree]) = {
+        //val (minX, maxX, minY, maxY, sumX, sumY, count) = boundaryAndMean
+        val minX = boundaryAndMean._1
+        val maxX = boundaryAndMean._2
+        val minY = boundaryAndMean._3
+        val maxY = boundaryAndMean._4
+        val sumX = boundaryAndMean._5
+        val sumY = boundaryAndMean._6
+        val count = boundaryAndMean._7
+
+        val meanX = sumX / count
+        val meanY = sumY / count
+        val tree = QuadTree(None, Cell(meanX, meanY, max(maxX - minX, maxY - minY)))
+
+        for (v <- embedding.asScala) {
+          tree.insert(v.vector.asBreeze)
+        }
+        out.collect(tree)
+      }
+    }).withBroadcastSet(boundaryAndMean, "boundaryAndMean")
+
+    // compute repulsive forces
+    val repForcesAndSum = embedding
+      .map(new RichMapFunction[LabeledVector, (Long, Vector, Double)] {
+      private var tree: QuadTree = null
+
+      override def open(parameters: Configuration) {
+        tree = getRuntimeContext.getBroadcastVariable[QuadTree]("tree").get(0)
+      }
+
+      def map(vector: LabeledVector): (Long, Vector, Double) = {
+        val leftVector = vector.vector
+        val index = vector.label.toLong
+
+        val (repForce, sumQ) = tree.computeRepulsiveForce(leftVector.asBreeze, 0.2)
+        (index, repForce.fromBreeze, sumQ)
+      }
+    }).withBroadcastSet(tree, "tree")
+
+    val sumQ = repForcesAndSum.map(x => x._3).reduce((x, y) => x + y)
+
+    // put everything together
+    //attrForces.join(repForcesAndSum).where(0).equalTo(0)((attr, rep) => LabeledVector(attr._1, (attr._2.asBreeze - rep._2.asBreeze).fromBreeze))
+    attrForces.join(repForcesAndSum).where(0).equalTo(0)
+      .map(new RichMapFunction[((Long, Vector), (Long, Vector, Double)), LabeledVector] {
       private var sumQ: Double = 0.0
 
       override def open(parameters: Configuration) {
-        embedding = getRuntimeContext.getBroadcastVariable[LabeledVector]("embedding").asScala
         sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
       }
 
-      def map(vector: LabeledVector): (Long, Vector) = {
-        val leftVector = vector.vector
-        val index = vector.label.toLong
-        val sumVector = embedding
-          .map(rightVector => {
-            val Z = 1 / (1 + metric.distance(leftVector, rightVector.vector))
-            val q = Z / sumQ
-            q * Z * (leftVector.asBreeze - rightVector.vector.asBreeze)
-        }).reduce((v1, v2) => v1 + v2)
+      def map(vectors: ((Long, Vector), (Long, Vector, Double))): LabeledVector = {
+        val attrForce = vectors._1._2.asBreeze
+        val repForce = vectors._2._2.asBreeze / sumQ
 
-        (index, sumVector.fromBreeze)
+        LabeledVector(vectors._1._1, (attrForce - repForce).fromBreeze)
       }
-    }).withBroadcastSet(embedding, "embedding")
-      .withBroadcastSet(sumOverAllAffinities, "sumQ")
-      .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
-
-    // put everything together
-    attrForces.join(repForces).where(0).equalTo(0)((attr, rep) => LabeledVector(attr._1, (attr._2.asBreeze - rep._2.asBreeze).fromBreeze))
+    }).withBroadcastSet(sumQ, "sumQ")
   }
 
   def centerEmbedding(embedding: DataSet[(Double, Vector, Vector, Vector)]): DataSet[(Double, Vector, Vector, Vector)] = {
