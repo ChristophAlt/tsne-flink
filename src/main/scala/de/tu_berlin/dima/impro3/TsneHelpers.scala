@@ -193,14 +193,7 @@ object TsneHelpers {
 
       def reduce(embedding: java.lang.Iterable[LabeledVector],
                   out: Collector[QuadTree]) = {
-        //val (minX, maxX, minY, maxY, sumX, sumY, count) = boundaryAndMean
-        val minX = boundaryAndMean._1
-        val maxX = boundaryAndMean._2
-        val minY = boundaryAndMean._3
-        val maxY = boundaryAndMean._4
-        val sumX = boundaryAndMean._5
-        val sumY = boundaryAndMean._6
-        val count = boundaryAndMean._7
+        val (minX, maxX, minY, maxY, sumX, sumY, count) = boundaryAndMean
 
         val meanX = sumX / count
         val meanY = sumY / count
