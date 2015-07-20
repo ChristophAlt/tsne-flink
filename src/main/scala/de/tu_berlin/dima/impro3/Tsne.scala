@@ -51,11 +51,12 @@ object Tsne {
 
     val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
+    val theta = parameters.getDouble("theta", 0.5)
 
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
     val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
-      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
+      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
@@ -86,7 +87,7 @@ object Tsne {
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
-                               finalMomentum: Double):
+                               finalMomentum: Double, theta: Double):
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
@@ -103,6 +104,6 @@ object Tsne {
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
 
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
-      initialMomentum, finalMomentum)
+      initialMomentum, finalMomentum, theta)
   }
 }

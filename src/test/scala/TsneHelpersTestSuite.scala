@@ -185,8 +185,10 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
     val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
     val sumQ = env.fromCollection(List(TsneHelpersTestSuite.denseSumQ))
+    // the result of setting theta to zero is the same as not using a quad-tree at all
+    val theta = 0.0
 
-    val results = gradient(jointDistribution, embedding, SquaredEuclideanDistanceMetric(), sumQ).collect()
+    val results = gradient(jointDistribution, embedding, SquaredEuclideanDistanceMetric(), sumQ, theta).collect()
 
     val expectedResults = TsneHelpersTestSuite.denseGradientResults
     
@@ -273,6 +275,8 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val nComponents = 2
     val iterations = 1
     val metric = SquaredEuclideanDistanceMetric()
+    // the result of setting theta to zero is the same as not using a quad-tree at all
+    val theta = 0.0
 
     val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
 
@@ -288,7 +292,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val workingSet = env.fromCollection(workingSetSeq)
 
-    val results = iterationComputation(iterations, momentum, workingSet, jointDistribution, metric, learningRate)
+    val results = iterationComputation(iterations, momentum, workingSet, jointDistribution, metric, learningRate, theta)
       .map(x => LabeledVector(x._1, x._2)).collect()
 
     val expectedResults = TsneHelpersTestSuite.updatedAndCentredEmbeddingResults
