@@ -52,8 +52,11 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val metric = SquaredEuclideanDistanceMetric()
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
-
-    val results = knnDescent(input, k = neighbors, metric = metric).collect()
+    val sample = input.collect().toList.head
+    val zKnn = new zKnn
+    val len = 3
+    val iter = 4
+    val results = zKnn.knnJoin(input, sample, len, iter, metric).collect()
     val expectedResults = TsneHelpersTestSuite.knnResults
 
     results.size should equal(expectedResults.size)
