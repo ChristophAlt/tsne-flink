@@ -20,4 +20,3 @@ project/plugins/project/
 src/main/scala/de/tu_berlin/dima/impro3/TsneHelpers.scala.orig
 src/main/scala/de/tu_berlin/dima/impro3/Tsne.scala.orig
 src/test/scala/TsneHelpersTestSuite.scala.orig
-src/test/resources/mnist_500.csv
