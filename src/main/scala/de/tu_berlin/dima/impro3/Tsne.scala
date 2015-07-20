@@ -39,7 +39,7 @@ object Tsne {
 
     val inputDimension = parameters.getRequired("dimension").toInt
 
-    val metric = parameters.get("metric", "sqeuclidean")
+    val metric = parameters.get("metric", "sqeucledian")
     val perplexity = parameters.getDouble("perplexity", 30.0)
     val nComponents = parameters.getLong("nComponents", 2)
     val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
@@ -93,7 +93,8 @@ object Tsne {
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
     //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
 
-    val knn = kNearestNeighbors(input, neighbors, metric)
+    //val knn = kNearestNeighbors(input, neighbors, metric)
+    val knn = partitionKnn(input, neighbors, metric, env.getParallelism)
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 

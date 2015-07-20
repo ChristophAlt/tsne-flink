@@ -22,16 +22,16 @@ import org.apache.flink.api.common.functions.{RichGroupReduceFunction, RichMapFu
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
-import org.apache.flink.ml.common.LabeledVector
+import org.apache.flink.ml._
+import org.apache.flink.ml.common.{FlinkMLTools, LabeledVector}
+import org.apache.flink.ml.math.Breeze._
 import org.apache.flink.ml.math.{DenseVector, Vector}
 import org.apache.flink.ml.metrics.distances.DistanceMetric
 import org.apache.flink.util.Collector
-import org.apache.flink.ml._
-import org.apache.flink.ml.math.Breeze._
 
+import scala.collection.JavaConverters._
 import scala.math._
 import scala.util.Random
-import scala.collection.JavaConverters._
 
 
 object TsneHelpers {
@@ -55,6 +55,38 @@ object TsneHelpers {
       .sortGroup(_._3, Order.ASCENDING)
       // either take the n nearest neighbors or take the 3u nearest neighbors by default
       .first(k)
+  }
+
+  def partitionKnn(input: DataSet[LabeledVector], k: Int, metric: DistanceMetric, blocks: Int): DataSet[(Long, Long, Double)] = {
+    val inputWithIndex = input.map(x => (x.label.toLong, x.vector))
+
+    val partitioner = FlinkMLTools.ModuloKeyPartitioner
+
+    val inputSplit = FlinkMLTools.block(inputWithIndex, blocks, Some(partitioner))
+
+    val crossed = inputSplit.cross(inputSplit).mapPartition {
+      (iter, out: Collector[(Long, Long, Double)]) => {
+        for ((split1, split2) <- iter) {
+          for (a <- split1.values; b <- split2.values) {
+            if (a._1 != b._1) {
+              out.collect(a._1, b._1, metric.distance(a._2, b._2))
+            }
+          }
+        }
+      }
+    }
+
+    val result = crossed.groupBy(0).sortGroup(2, Order.ASCENDING).reduceGroup {
+      (iter, out: Collector[(Long, Long, Double)]) => {
+        if (iter.hasNext) {
+          for (n <- iter.take(k)) {
+            out.collect(n)
+          }
+        }
+      }
+    }
+
+    result
   }
 
   def pairwiseAffinities(input: DataSet[(Long, Long, Double)], perplexity: Double):
