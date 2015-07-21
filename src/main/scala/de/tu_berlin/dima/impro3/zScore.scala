@@ -9,7 +9,7 @@ import scala.math._
 /**
  * Created by jguenthe on 20.07.2015.
  */
-class zScore extends Serializable {
+object zScore extends Serializable {
 
 
   /**
@@ -26,9 +26,8 @@ class zScore extends Serializable {
     //      map(word => word._2 -> word._1)
 
 
-
-    val score = data.map(word => (scoreOfDataPoint(word.vector).bigInteger, word.label)).
-      sortPartition(0, order = Order.ASCENDING).map(word => (word._2.toLong, new scala.BigInt(word._1)))
+    val score = data.map(word => word.label.toLong -> scoreOfDataPoint(word.vector))
+    // sortPartition(0, order = Order.ASCENDING).map(word => (word._2.toLong, new scala.BigInt(word._1)))
 
 
     score
@@ -42,26 +41,26 @@ class zScore extends Serializable {
    */
   def scoreOfDataPoint(vector: org.apache.flink.ml.math.Vector): BigInt = {
 
-    val x = vector.toArray.map(element => {
-      element._2.toLong
-    })
 
-    var temp = 0L
+    //Vector is implemented in Flink as double
+    var x = vector.map(element => {
+      element._2.toInt.toString.toInt
+    }).toVector.toArray
+
+    var temp = 0
     var score: BigInt = 0
     var counter = 0
-
-    while (checkVectors(x) == 0) {
-      for (i <- x.length - 1 to 0 by -1) {
+    while(checkVectors(x) == 0) {
+      for(i <- x.length-1 to 0 by -1){
         temp = x(i) & ((1 << 1) - 1)
         temp = temp << counter
-        score = score + temp
-        x(i) = x(i) >> 1
+        score = score+temp
+        x(i) = x(i)>>1
         counter = counter + 1
       }
     }
     score
   }
-
 
   /**
    * Checks if all entries within the array are 0 or not
@@ -69,11 +68,11 @@ class zScore extends Serializable {
    * @param Array of Int
    * @return 1, if all elements are zero; else 0
    */
-  def checkVectors(vector: Array[Long]): Int = {
+  def checkVectors(vector : Array[Int]) : Int = {
     var flag = 1
 
-    for (i <- 0 to vector.length - 1) {
-      if (vector(i) != 0) {
+    for(i <- 0 to vector.length - 1){
+      if(vector(i)!=0){
         flag = 0
       }
     }

@@ -15,11 +15,12 @@ import org.apache.flink.ml.metrics.distances.DistanceMetric
 import de.tu_berlin.dima.impro3.zScore
 import org.apache.flink.api.common.operators.Order
 import scala.collection.JavaConverters._
+import scala.collection.mutable
 
 import scala.util.Random
 
 
-class zKnn {
+object zKnn {
 
   /**
    * Computes the nearest neighbors in the data-set for the data-point against which KNN
@@ -40,7 +41,7 @@ class zKnn {
     val size = dataSet.first(1).collect().toSeq(0).vector.size
     val rand = new Array[Int](size)
     val randomValue = new Random
-    val zScore = new zScore
+
     val model = zScore.computeScore(dataSet)
     val dataScore = zScore.scoreOfDataPoint(dataPoint.vector)
 
@@ -52,11 +53,11 @@ class zKnn {
     //TODO replace with iterate
     for (i <- 2 to randomSize) {
       //random vector
-      for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(100)
+      for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(10)
       var kLooped = -1
       val updatedData: DataSet[LabeledVector] = dataSet.map(
         mapper = new RichMapFunction[LabeledVector, LabeledVector]() {
-          var rand: Traversable[Array[Int]] = null
+          var rand: mutable.Buffer[Array[Int]] = null
 
           override def open(config: Configuration): Unit = {
             rand = getRuntimeContext
@@ -65,17 +66,18 @@ class zKnn {
 
           def map(in: LabeledVector): LabeledVector = {
             kLooped = -1
-            val strings = in.vector.map(word => word.toString() + rand.head({
+            val arr = rand.toArray.head
+            val strings = in.vector.map(word => word._2 + arr({
               kLooped = kLooped + 1
               //Todo second boarcastset
-              kLooped % size
+              kLooped % 3
             }));
-            val newVector = strings.map(el => el.toInt.toDouble).toArray
+            val newVector = strings.map(el => el.toDouble).toArray
             new LabeledVector(in.label, new DenseVector(newVector))
           }
 
         }
-      ).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromCollection(rand), bcKey) // 2. Broadcast the DataSet
+      ).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromElements(rand), bcKey) // 2. Broadcast the DataSet
 
       /*        var rand=getRuntimeContext().getBroadcastVariable[String]("broadcastSetName").asScala
               kLooped = -1
@@ -87,12 +89,12 @@ class zKnn {
               new LabeledVector(element.label, new DenseVector(newVector))*/
 
 
-      val newDataValue = dataPoint.vector.map(word => word.toString() + rand({
+      val newDataValue = dataPoint.vector.map(word => word._2 + rand({
         kLooped = kLooped + 1
-        kLooped % size
-      }))
+        kLooped % 3
+      })).toArray
 
-      val newDataPoint = new LabeledVector(dataPoint.label, dataPoint.vector)
+      val newDataPoint = new LabeledVector(dataPoint.label, DenseVector(newDataValue))
 
       //
       val modelLooped = zScore.computeScore(updatedData)
@@ -111,7 +113,8 @@ class zKnn {
             })*/
 
       val cleaned = looped.map(mapper = new RichMapFunction[LabeledVector, LabeledVector] {
-        var rand: Traversable[Array[Int]] = null
+        var rand: mutable.Buffer[Array[Int]] = null
+
         override def open(config: Configuration): Unit = {
           rand = getRuntimeContext
             .getBroadcastVariable[Array[Int]]("RAND").asScala
@@ -119,14 +122,15 @@ class zKnn {
 
         override def map(line: LabeledVector): LabeledVector = {
           var index = -1
-          val vec = line.vector.map(word => word._2.toInt - rand.head({
+          val arr = rand.toArray.head
+          val vec = line.vector.map(word => word._2.toInt - arr({
             index = index + 1
-            index % size
+            index % 3
           })).toArray
           new LabeledVector(line.label, DenseVector(vec))
 
         }
-      }).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromCollection(rand), bcKey)
+      }).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromCollection(rand), "RAND")
 
       compute = compute.union(cleaned)
     }
@@ -164,10 +168,10 @@ class zKnn {
     val greaterScore = zScore.filter(word => word._2 > dataScore).map(word => (word._1, word._2.bigInteger)).
       sortPartition(1, Order.ASCENDING).map(w => (w._1, new BigInt(w._2)))
 
-    val lesserScore = zScore.filter(word => word._2 < dataScore)
+    val lesserScore = zScore.filter(word => word._2 <= dataScore)
 
     if (greaterScore.count() > len && lesserScore.count() > len) {
-      val trim = greaterScore.filter(word => word._2 < len).map(word => word._1).
+      val trimtmp = greaterScore.filter(word => word._2 < len).map(word => word._1).
         union(lesserScore.filter(word => word._2 < len).map(word => word._1))
 
       /** Spark version
@@ -176,23 +180,34 @@ class zKnn {
             .map(word => word._2._1 -> word._1)
         */
 
-      val join = data.map(element => (element.label.toLong, element.vector)).join(trim).where(0).equalTo(0).map(el => new LabeledVector(el._2, el._1._2))
+      val trim = trimtmp.map(el => (el, 1))
+      val join = data.map(element => (element.label.toLong, element.vector)).join(trim).where(0).equalTo(0) {
+        (left, right) => {
+          new LabeledVector(right._1, left._2)
+        }
+      }
       join
     }
     else if (greaterScore.count() < len) {
       val lenMod = len + (len - greaterScore.count)
-      val trim = greaterScore.map(word => word._1)
+      val trimtmp = greaterScore.map(word => word._1)
         .union(lesserScore.filter(word => word._2 < lenMod)
         .map(word => word._1))
 
-      val join = data.map(element => (element.label.toLong, element.vector)).join(trim).where(0).equalTo(0).map(el => new LabeledVector(el._2, el._1._2))
+      val trim = trimtmp.map(el => (el, 1))
+      val join = data.map(element => (element.label.toLong, element.vector)).join(trim).where(0).equalTo(0) {
+        (left, right) => {
+          new LabeledVector(right._1, left._2)
+        }
+      }
       join
     }
     else {
       val lenMod = len + (len - lesserScore.count)
-      val trim = greaterScore.filter(word => word._2 < lenMod).map(word => word._1)
-        .union(lesserScore.map(word => (word._1))).map(el => (el, 1))
+      val trimtmp = greaterScore.filter(word => word._2 < scala.math.BigInt.long2bigInt(lenMod)).map(el => el._1)
+        .union(lesserScore.map(el => (el._1)))
 
+      val trim = trimtmp.map(el => (el, 1))
       val join = data.map(element => (element.label.toLong, element.vector)).join(trim).where(0).equalTo(0) {
         (left, right) => {
           new LabeledVector(right._1, left._2)
