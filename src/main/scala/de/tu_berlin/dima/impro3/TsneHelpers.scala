@@ -299,7 +299,7 @@ object TsneHelpers {
   
   def iterationComputation (iterations: Int, momentum: Double, workingSet: DataSet[(Double, Vector, Vector, Vector)],
                             highdimAffinites: DataSet[(Long, Long, Double)], metric: DistanceMetric,
-                            learningRate: Double) = {
+                            learningRate: Double, treeDepth: Int, theta: Double, outputDimensions: Int, env: ExecutionEnvironment) = {
     workingSet.iterate(iterations) {
       // (label, embedding, gradient, gains)
       workingSet =>
@@ -314,7 +314,8 @@ object TsneHelpers {
       //val sumAffinities = results.sumQ
       val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
 
-      val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities)
+      //gradient(highdimAffinites, currentEmbedding, metric, sumAffinities)
+      val dY = Tree.gradient(currentEmbedding,metric,treeDepth, treeDepth-1, highdimAffinites, theta, outputDimensions)
 
       val minGain = 0.01
 
@@ -328,7 +329,7 @@ object TsneHelpers {
 
   def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialWorkingSet: DataSet[(Double, Vector, Vector, Vector)],
                learningRate: Double, iterations: Int, metric: DistanceMetric,
-               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double):
+               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double,treeDepth: Int, theta: Double, outputDimensions: Int, env: ExecutionEnvironment):
   DataSet[LabeledVector] = {
 
     val iterInitMomentumExaggeration = min(iterations, 20)
@@ -342,18 +343,18 @@ object TsneHelpers {
 
     // iterate with initial momentum and exaggerated input
     embedding = iterationComputation(iterInitMomentumExaggeration, initialMomentum,
-      initialWorkingSet, exaggeratedAffinities, metric, learningRate)
+      initialWorkingSet, exaggeratedAffinities, metric, learningRate, treeDepth, theta, outputDimensions, env)
 
     if (iterExaggeration > 0) {
       // iterate with final momentum and exaggerated input
       embedding = iterationComputation(iterExaggeration, finalMomentum, embedding, exaggeratedAffinities,
-        metric, learningRate)
+        metric, learningRate, treeDepth, theta, outputDimensions, env)
     }
 
     // iterate with final momentum and standard input
     if (iterWoExaggeration > 0) {
       embedding = iterationComputation(iterWoExaggeration, finalMomentum, embedding, highDimAffinities,
-        metric, learningRate)
+        metric, learningRate, treeDepth, theta, outputDimensions, env)
     }
 
     embedding.map(x => LabeledVector(x._1, x._2))

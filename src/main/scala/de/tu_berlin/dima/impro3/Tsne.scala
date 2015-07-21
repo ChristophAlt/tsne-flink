@@ -46,23 +46,27 @@ object Tsne {
     val learningRate = parameters.getDouble("learningRate", 1000)
     val iterations = parameters.getLong("iterations", 300)
 
+    val treeDepth = parameters.getLong("treeDepth", 100).toInt
+
     val randomState = parameters.getLong("randomState", 0)
     val neighbors = parameters.getLong("neighbors", 3 * perplexity.toInt)
 
     val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
 
+    val theta = parameters.getDouble("theta", 0.5)
+
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
     val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
-      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum)
+      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
     env.execute("TSNE")
   }
 
-  private def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
+  def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
                         fields: Array[Int]): DataSet[LabeledVector] = {
     env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
       .groupBy(_._1).reduceGroup(
@@ -82,11 +86,11 @@ object Tsne {
     }
   }
 
-  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[LabeledVector], metric: DistanceMetric,
+  def computeEmbedding(env: ExecutionEnvironment, input: DataSet[LabeledVector], metric: DistanceMetric,
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
-                               finalMomentum: Double):
+                               finalMomentum: Double, theta: Double):
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
@@ -101,8 +105,10 @@ object Tsne {
     val jntDistribution = jointDistribution(pwAffinities)
 
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
-
+    
+    val treeDepth = (Math.log(env.getParallelism) / Math.log(Math.pow(2,nComponents))).ceil.toInt
+    
     optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
-      initialMomentum, finalMomentum)
+      initialMomentum, finalMomentum, treeDepth, theta, nComponents, env)
   }
 }
