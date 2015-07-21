@@ -19,7 +19,7 @@
 package de.tu_berlin.dima.impro3;
 
 import org.apache.flink.api.common.accumulators.Accumulator;
-import org.apache.flink.api.java.tuple.Tuple2;
+import scala.Tuple2;
 
 import java.util.HashMap;
 
@@ -32,8 +32,8 @@ public class MapAccumulator implements Accumulator<Tuple2<Integer, Double>, Hash
 
     @Override
     public void add(Tuple2<Integer, Double> kv) {
-        Integer key = kv.f0;
-        Double value = kv.f1;
+        Integer key = kv._1();
+        Double value = kv._2();
 
         if (localValue.containsKey(key)) {
             localValue.put(key, localValue.get(key) + value);

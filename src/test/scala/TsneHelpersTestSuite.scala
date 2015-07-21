@@ -188,7 +188,12 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     // the result of setting theta to zero is the same as not using a quad-tree at all
     val theta = 0.0
 
-    val results = gradient(jointDistribution, embedding, SquaredEuclideanDistanceMetric(), sumQ, theta).collect()
+    val grad = embedding.iterate(1) {
+      currentEmbedding =>
+        gradient(jointDistribution, currentEmbedding, SquaredEuclideanDistanceMetric(), sumQ, theta)
+    }
+
+    val results = grad.collect()
 
     val expectedResults = TsneHelpersTestSuite.denseGradientResults
     

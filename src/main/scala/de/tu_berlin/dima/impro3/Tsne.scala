@@ -60,7 +60,12 @@ object Tsne {
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
-    env.execute("TSNE")
+    val executionResult = env.execute("TSNE")
+
+    import java.io._
+    val pw = new PrintWriter(new File("/Users/Chris/Downloads/loss.txt" ))
+    pw.write(executionResult.getAccumulatorResult("loss").toString)
+    pw.close
   }
 
   private def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,

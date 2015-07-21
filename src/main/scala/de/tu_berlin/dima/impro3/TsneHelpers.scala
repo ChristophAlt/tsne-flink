@@ -18,6 +18,7 @@
 
 package de.tu_berlin.dima.impro3
 
+import org.apache.flink.api.common.accumulators.DoubleCounter
 import org.apache.flink.api.common.functions.{RichGroupReduceFunction, RichMapFunction}
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
@@ -184,30 +185,8 @@ object TsneHelpers {
   }
 
   def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
-               metric: DistanceMetric, sumOverAllAffinities: DataSet[Double], theta: Double):
+               metric: DistanceMetric, sumOverAllAffinities: DataSet[Double], theta: Double, iterOffset: Int=0):
     DataSet[LabeledVector] = {
-    // compute attracting forces
-    val attrForces = highDimAffinities
-      .map(new RichMapFunction[(Long, Long, Double), (Long, Vector)] {
-      private var embedding: Map[Long, Vector] = null
-
-      override def open(parameters: Configuration) {
-        embedding = getRuntimeContext.getBroadcastVariable[LabeledVector]("embedding")
-          .asScala.map(x => x.label.toLong -> x.vector).toMap
-      }
-
-      def map(pij: (Long, Long, Double)): (Long, Vector) = {
-        val i = pij._1
-        val j = pij._2
-        val p = pij._3
-
-        val partialGradient = (p / (1 + metric.distance(embedding(i), embedding(j))) *
-          (embedding(i).asBreeze - embedding(j).asBreeze)).fromBreeze
-
-        (i, partialGradient)
-      }
-    }).withBroadcastSet(embedding, "embedding")
-      .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
 
     // find xMin, xMax, yMin and yMax, as well as meanX and meanY
     val boundaryAndMean = embedding.map(x => (x.vector(0), x.vector(0), x.vector(1), x.vector(1), x.vector(0), x.vector(1), 1))
@@ -258,8 +237,44 @@ object TsneHelpers {
 
     val sumQ = repForcesAndSum.map(x => x._3).reduce((x, y) => x + y)
 
+    // compute attracting forces
+    val attrForces = highDimAffinities
+      .map(new RichMapFunction[(Long, Long, Double), (Long, Vector)] {
+      private var embedding: Map[Long, Vector] = null
+      private var lossAccumulator = new MapAccumulator()
+      private var accu = new DoubleCounter()
+      private var currentIteration = 0
+      private var sumQ = 0.0
+
+      override def open(parameters: Configuration) {
+        embedding = getRuntimeContext.getBroadcastVariable[LabeledVector]("embedding")
+          .asScala.map(x => x.label.toLong -> x.vector).toMap
+        sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
+        currentIteration = getIterationRuntimeContext.getSuperstepNumber
+        getRuntimeContext.addAccumulator("loss", lossAccumulator)
+      }
+
+      def map(pij: (Long, Long, Double)): (Long, Vector) = {
+        val i = pij._1
+        val j = pij._2
+        val p = pij._3
+
+        val q = 1 / (1 + metric.distance(embedding(i), embedding(j)))
+
+        if ((currentIteration + iterOffset) % 10 == 0) {
+          val partialLoss = p * log(p / (q / sumQ))
+          lossAccumulator.add((currentIteration + iterOffset, partialLoss))
+        }
+
+        val partialGradient = (p * q * (embedding(i).asBreeze - embedding(j).asBreeze)).fromBreeze
+
+        (i, partialGradient)
+      }
+    }).withBroadcastSet(embedding, "embedding")
+      .withBroadcastSet(sumQ, "sumQ")
+      .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
+
     // put everything together
-    //attrForces.join(repForcesAndSum).where(0).equalTo(0)((attr, rep) => LabeledVector(attr._1, (attr._2.asBreeze - rep._2.asBreeze).fromBreeze))
     attrForces.join(repForcesAndSum).where(0).equalTo(0)
       .map(new RichMapFunction[((Long, Vector), (Long, Vector, Double)), LabeledVector] {
       private var sumQ: Double = 0.0
@@ -325,7 +340,7 @@ object TsneHelpers {
   
   def iterationComputation (iterations: Int, momentum: Double, workingSet: DataSet[(Double, Vector, Vector, Vector)],
                             highdimAffinites: DataSet[(Long, Long, Double)], metric: DistanceMetric,
-                            learningRate: Double, theta: Double) = {
+                            learningRate: Double, theta: Double, iterOffset: Int=0) = {
     workingSet.iterate(iterations) {
       // (label, embedding, gradient, gains)
       workingSet =>
@@ -340,7 +355,7 @@ object TsneHelpers {
       //val sumAffinities = results.sumQ
       val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
 
-      val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities, theta)
+      val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities, theta, iterOffset)
 
       val minGain = 0.01
 
@@ -368,18 +383,18 @@ object TsneHelpers {
 
     // iterate with initial momentum and exaggerated input
     embedding = iterationComputation(iterInitMomentumExaggeration, initialMomentum,
-      initialWorkingSet, exaggeratedAffinities, metric, learningRate, theta)
+      initialWorkingSet, exaggeratedAffinities, metric, learningRate, theta, 0)
 
     if (iterExaggeration > 0) {
       // iterate with final momentum and exaggerated input
       embedding = iterationComputation(iterExaggeration, finalMomentum, embedding, exaggeratedAffinities,
-        metric, learningRate, theta)
+        metric, learningRate, theta, iterInitMomentumExaggeration)
     }
 
     // iterate with final momentum and standard input
     if (iterWoExaggeration > 0) {
       embedding = iterationComputation(iterWoExaggeration, finalMomentum, embedding, highDimAffinities,
-        metric, learningRate, theta)
+        metric, learningRate, theta, iterExaggeration + iterInitMomentumExaggeration)
     }
 
     embedding.map(x => LabeledVector(x._1, x._2))
