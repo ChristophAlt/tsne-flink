@@ -1,7 +1,4 @@
-
-
-/**
- /*
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -21,15 +18,15 @@
 
 package datasetUtil;
 
-        import org.apache.flink.api.common.functions.RichMapPartitionFunction;
-        import org.apache.flink.api.java.DataSet;
-        import org.apache.flink.api.java.tuple.Tuple2;
-        import org.apache.flink.configuration.Configuration;
-        import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.functions.RichMapPartitionFunction;
+import org.apache.flink.api.java.DataSet;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.util.Collector;
 
-        import java.util.Collections;
-        import java.util.Comparator;
-        import java.util.List;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * This class provides simple utility methods for zipping elements in a data set with an index

@@ -33,7 +33,7 @@ class zKnnTest extends FlatSpec with Matchers {
     test.head._2.intValue() should equal(0)
 
   }
-
+  /**
   "test zKnn" should "return smth valid" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
@@ -51,6 +51,29 @@ class zKnnTest extends FlatSpec with Matchers {
 
     test1 should (contain(LabeledVector(1, DenseVector(0, 0, 0, 0))))
 
+
+  } */
+
+
+  "knnDescent" should "return the k  neighbors for each SparseVector" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val neighbors = 80
+    val metric = SquaredEuclideanDistanceMetric()
+
+    val input: DataSet[LabeledVector] = env.readTextFile("D:\\Users\\jguenthe\\Documents\\tsne-zalando\\src\\test\\resources\\mnist_500.csv").map(
+      element => {
+        val vr = element.split(",").map(el => el.toDouble)
+        new LabeledVector(Random.nextInt(), new DenseVector(vr))
+      }
+    )
+
+    val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 1, 1, 0)))
+
+    println("Starting")
+    val results = zKnn.knnJoin(input,sample,30,6,new SquaredEuclideanDistanceMetric).collect()
+
+    results.size should equal(input.count() * neighbors)
 
   }
 
