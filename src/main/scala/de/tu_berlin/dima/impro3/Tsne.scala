@@ -52,6 +52,7 @@ object Tsne {
     val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
     val theta = parameters.getDouble("theta", 0.5)
+    val lossFile = parameters.get("loss", "loss.txt")
 
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
@@ -63,7 +64,7 @@ object Tsne {
     val executionResult = env.execute("TSNE")
 
     import java.io._
-    val pw = new PrintWriter(new File("/Users/Chris/Downloads/loss.txt" ))
+    val pw = new PrintWriter(new File(lossFile))
     pw.write(executionResult.getAccumulatorResult("loss").toString)
     pw.close
   }
