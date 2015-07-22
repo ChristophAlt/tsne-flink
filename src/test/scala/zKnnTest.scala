@@ -38,16 +38,18 @@ class zKnnTest extends FlatSpec with Matchers {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val toTest = new ListBuffer[LabeledVector]
-    for (a <- 0 until 8) toTest.append(new LabeledVector(a, DenseVector(Array(a, a, a, a))))
+    for (a <- 0 until 9) toTest.append(new LabeledVector(a, DenseVector(Array(a, a, a, a))))
     val data = env.fromCollection(toTest)
 
-    val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 5, 3,0)))
+    val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 1, 1, 0)))
 
     val len = 4
     val iter = 4
-    val test = zKnn.knnJoin(data, sample, len, iter, new SquaredEuclideanDistanceMetric).collect().toList
+    val model = zKnn.knnJoin(data, sample, len, iter, new SquaredEuclideanDistanceMetric)
 
-    test.head should equal(null)
+    val test1 = neighbors(model, DenseVector(1, 1, 1, 1), 4, new SquaredEuclideanDistanceMetric).collect().toList
+
+    test1 should (contain(LabeledVector(1, DenseVector(0, 0, 0, 0))))
 
 
   }

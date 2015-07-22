@@ -26,6 +26,8 @@ import org.apache.flink.ml.metrics.distances.SquaredEuclideanDistanceMetric
 import org.scalatest._
 import org.apache.flink.ml.math.Breeze._
 
+import scala.util.Random
+
 
 class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
   "kNearestNeighbors" should "return the k nearest neighbors for each SparseVector" in {
@@ -52,8 +54,8 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val metric = SquaredEuclideanDistanceMetric()
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
-    val sample = input.collect().toList.head
-    val zKnn = new zKnn
+    val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 5, 3)))
+
     val len = 3
     val iter = 4
     val results = zKnn.knnJoin(input, sample, len, iter, metric).collect()

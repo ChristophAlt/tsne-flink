@@ -16,6 +16,7 @@ import de.tu_berlin.dima.impro3.zScore
 import org.apache.flink.api.common.operators.Order
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+import DataSetUtils._
 
 import scala.util.Random
 
@@ -66,11 +67,12 @@ object zKnn {
 
           def map(in: LabeledVector): LabeledVector = {
             kLooped = -1
+            val size = in.vector.size
             val arr = rand.toArray.head
             val strings = in.vector.map(word => word._2 + arr({
               kLooped = kLooped + 1
               //Todo second boarcastset
-              kLooped % 3
+              kLooped % size
             }));
             val newVector = strings.map(el => el.toDouble).toArray
             new LabeledVector(in.label, new DenseVector(newVector))
@@ -79,19 +81,10 @@ object zKnn {
         }
       ).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromElements(rand), bcKey) // 2. Broadcast the DataSet
 
-      /*        var rand=getRuntimeContext().getBroadcastVariable[String]("broadcastSetName").asScala
-              kLooped = -1
-              val strings = element.vector.map(word => word.toString() + rand({
-                kLooped = kLooped + 1
-                kLooped % size
-              }));
-              val newVector = strings.map(el => el.toInt.toDouble).toArray
-              new LabeledVector(element.label, new DenseVector(newVector))*/
-
 
       val newDataValue = dataPoint.vector.map(word => word._2 + rand({
         kLooped = kLooped + 1
-        kLooped % 3
+        kLooped % size
       })).toArray
 
       val newDataPoint = new LabeledVector(dataPoint.label, DenseVector(newDataValue))
@@ -122,21 +115,22 @@ object zKnn {
 
         override def map(line: LabeledVector): LabeledVector = {
           var index = -1
+          val size = line.vector.size
           val arr = rand.toArray.head
-          val vec = line.vector.map(word => word._2.toInt - arr({
+          val vec = line.vector.map(word => word._2 - arr({
             index = index + 1
-            index % 3
+            index % size
           })).toArray
           new LabeledVector(line.label, DenseVector(vec))
 
         }
-      }).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromCollection(rand), "RAND")
+      }).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromElements(rand), bcKey)
 
       compute = compute.union(cleaned)
     }
 
-    zKNN(removeRedundantEntries(compute), dataPoint.vector, len, metric)
-
+//    zKNN(removeRedundantEntries(compute), dataPoint.vector, len, metric)
+      removeRedundantEntries(compute)
   }
 
   /**
@@ -165,20 +159,15 @@ object zKnn {
                                    zScore: DataSet[(Long, BigInt)],
                                    dataScore: BigInt) = {
 
-    val greaterScore = zScore.filter(word => word._2 > dataScore).map(word => (word._1, word._2.bigInteger)).
-      sortPartition(1, Order.ASCENDING).map(w => (w._1, new BigInt(w._2)))
+    val greaterScore = zScore.filter(word => word._2 > dataScore).map(word => (word._2.bigInteger -> word._1)).
+      sortPartition(0, Order.ASCENDING).map(w => (w._2)).zipWithIndex.map(el => el._2 -> el._1)
 
-    val lesserScore = zScore.filter(word => word._2 <= dataScore)
+    val lesserScore = zScore.filter(word => word._2 <= dataScore).map(wr => wr._1).zipWithIndex
 
     if (greaterScore.count() > len && lesserScore.count() > len) {
       val trimtmp = greaterScore.filter(word => word._2 < len).map(word => word._1).
         union(lesserScore.filter(word => word._2 < len).map(word => word._1))
 
-      /** Spark version
-        * val join = rdd.map(word => word._2 -> word._1)
-            .join(trim.map(word => word -> 0))
-            .map(word => word._2._1 -> word._1)
-        */
 
       val trim = trimtmp.map(el => (el, 1))
       val join = data.map(element => (element.label.toLong, element.vector)).join(trim).where(0).equalTo(0) {
@@ -204,7 +193,7 @@ object zKnn {
     }
     else {
       val lenMod = len + (len - lesserScore.count)
-      val trimtmp = greaterScore.filter(word => word._2 < scala.math.BigInt.long2bigInt(lenMod)).map(el => el._1)
+      val trimtmp = greaterScore.filter(word => word._2 < lenMod).map(el => el._1)
         .union(lesserScore.map(el => (el._1)))
 
       val trim = trimtmp.map(el => (el, 1))
@@ -222,12 +211,14 @@ object zKnn {
     return DataSet.map(vr => (vr.label, vr.vector)).distinct(0).map(el => new LabeledVector(el._1, el._2))
   }
 
-  private def zKNN(reducedData: DataSet[LabeledVector],
+   def neighbors(reducedData: DataSet[LabeledVector],
                    dataPoint: org.apache.flink.ml.math.Vector
                    , k: Int, metric: DistanceMetric): DataSet[LabeledVector] = {
 
-    val distData = reducedData.map(word => ((metric.distance(dataPoint, word.vector), word))).sortPartition(0, Order.ASCENDING)
-      .filter(word => word._1 < k).map(word => word._2)
+    val distData = reducedData.map(word => metric.distance(dataPoint, word.vector) -> word)
+      .sortPartition(0, Order.ASCENDING)
+      .zipWithIndex.filter(wl => wl._1 < k).map(wl => wl._2._2)
+
     distData
 
     /** Spark Code
