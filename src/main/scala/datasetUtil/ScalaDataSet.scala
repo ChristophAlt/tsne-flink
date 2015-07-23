@@ -19,7 +19,9 @@
 package org.apache.flink.api.scala
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.api.java.{utils => jutils}
+import datasetUtil.{DataSetUtils => jutils}
+
+//import org.apache.flink.api.java.{utils => jutils}
 
 import _root_.scala.language.implicitConversions
 import _root_.scala.reflect.ClassTag
@@ -39,7 +41,7 @@ class DataSetUtils[T](val self: DataSet[T]) extends AnyVal {
    */
   def zipWithIndex(implicit ti: TypeInformation[(Long, T)],
                    ct: ClassTag[(Long, T)]): DataSet[(Long, T)] = {
-    wrap(jutils.DataSetUtils.zipWithIndex(self.javaSet))
+    wrap(jutils.zipWithIndex(self.javaSet))
       .map { t => (t.f0.toLong, t.f1) }
   }
 }
@@ -48,6 +50,6 @@ object DataSetUtils {
   /**
    * Tie the new class to an existing Scala API class: DataSet.
    */
-  implicit def utilsToDataSet[T: TypeInformation: ClassTag](dataSet: DataSet[T]) =
+  implicit def utilsToDataSet[T: TypeInformation : ClassTag](dataSet: DataSet[T]) =
     new DataSetUtils[T](dataSet)
 }

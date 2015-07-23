@@ -4,24 +4,21 @@ package de.tu_berlin.dima.impro3
  * Created by jguenthe on 20.07.2015.
  */
 
-import breeze.linalg.SparseVector
 import org.apache.flink.api.common.functions.RichMapFunction
+import org.apache.flink.api.common.operators.Order
+import org.apache.flink.api.scala.DataSetUtils._
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math
 import org.apache.flink.ml.math.DenseVector
 import org.apache.flink.ml.metrics.distances.DistanceMetric
-import de.tu_berlin.dima.impro3.zScore
-import org.apache.flink.api.common.operators.Order
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
-import DataSetUtils._
-
 import scala.util.Random
 
 
-object zKnn {
+object zKnn extends Serializable {
 
   /**
    * Computes the nearest neighbors in the data-set for the data-point against which KNN
@@ -129,8 +126,8 @@ object zKnn {
       compute = compute.union(cleaned)
     }
 
-//    zKNN(removeRedundantEntries(compute), dataPoint.vector, len, metric)
-      removeRedundantEntries(compute)
+    //    zKNN(removeRedundantEntries(compute), dataPoint.vector, len, metric)
+    removeRedundantEntries(compute)
   }
 
   /**
@@ -159,10 +156,20 @@ object zKnn {
                                    zScore: DataSet[(Long, BigInt)],
                                    dataScore: BigInt) = {
 
-    val greaterScore = zScore.filter(word => word._2 > dataScore).map(word => (word._2.bigInteger -> word._1)).
-      sortPartition(0, Order.ASCENDING).map(w => (w._2)).zipWithIndex.map(el => el._2 -> el._1)
+    val greaterScoreTmp = zScore.filter(word => word._2 > dataScore).map(word => (word._2.bigInteger -> word._1)).
+      sortPartition(0, Order.ASCENDING).map(w => (w._2))
 
-    val lesserScore = zScore.filter(word => word._2 <= dataScore).map(wr => wr._1).zipWithIndex
+    println("Score: " + greaterScoreTmp.count())
+
+    val greaterScore = greaterScoreTmp.zipWithIndex.map(el => el._2 -> el._1)
+
+
+    val lesserScoreTmp = zScore.filter(word => word._2 <= dataScore).map(wr => wr._1)
+
+    println("Lesser Score:" + lesserScoreTmp.count())
+
+    val lesserScore = lesserScoreTmp.zipWithIndex
+
 
     if (greaterScore.count() > len && lesserScore.count() > len) {
       val trimtmp = greaterScore.filter(word => word._2 < len).map(word => word._1).
@@ -211,14 +218,15 @@ object zKnn {
     return DataSet.map(vr => (vr.label, vr.vector)).distinct(0).map(el => new LabeledVector(el._1, el._2))
   }
 
-   def neighbors(reducedData: DataSet[LabeledVector],
-                   dataPoint: org.apache.flink.ml.math.Vector
-                   , k: Int, metric: DistanceMetric): DataSet[LabeledVector] = {
+  def neighbors(reducedData: DataSet[LabeledVector],
+                dataPoint: org.apache.flink.ml.math.Vector
+                , k: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
 
     val distData = reducedData.map(word => metric.distance(dataPoint, word.vector) -> word)
       .sortPartition(0, Order.ASCENDING)
-      .zipWithIndex.filter(wl => wl._1 < k).map(wl => wl._2._2)
+      .zipWithIndex.filter(wl => wl._1 < k).map(wl => (dataPoint.size.toLong, wl._2._2.label.toLong, wl._2._1))
 
+    println("Got data " + distData.toString)
     distData
 
     /** Spark Code

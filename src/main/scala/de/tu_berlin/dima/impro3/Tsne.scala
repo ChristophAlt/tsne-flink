@@ -22,9 +22,8 @@ import de.tu_berlin.dima.impro3.TsneHelpers._
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
 import org.apache.flink.core.fs.FileSystem.WriteMode
-
 import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math.{Vector, SparseVector}
+import org.apache.flink.ml.math.SparseVector
 import org.apache.flink.ml.metrics.distances._
 
 import scala.util.Try
@@ -67,7 +66,7 @@ object Tsne {
     env.execute("TSNE")
   }
 
-  private def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
+   def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
                         fields: Array[Int]): DataSet[LabeledVector] = {
     env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
       .groupBy(_._1).reduceGroup(
