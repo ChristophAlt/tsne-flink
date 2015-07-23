@@ -53,11 +53,13 @@ object Tsne {
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
     val theta = parameters.getDouble("theta", 0.5)
     val lossFile = parameters.get("loss", "loss.txt")
+    val knnIterations = parameters.getLong("knnIterations", 3)
+    val knnMethod = parameters.getRequired("knnMethod")
 
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
     val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
-      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta)
+      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta, knnMethod, knnIterations)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
@@ -93,15 +95,19 @@ object Tsne {
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
-                               finalMomentum: Double, theta: Double):
+                               finalMomentum: Double, theta: Double, knnMethod: String, knnIterations: Int):
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
     //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
 
-    //val knn = kNearestNeighbors(input, neighbors, metric)
-    val knn = partitionKnn(input, neighbors, metric, env.getParallelism)
+    val knn = knnMethod match {
+      case "bruteforce" => kNearestNeighbors(input, neighbors, metric)
+      case "partition" => partitionKnn(input, neighbors, metric, env.getParallelism)
+      case "project" => projectKnn(input, neighbors, metric, inputDimension, knnIterations)
+      case _ => throw new IllegalArgumentException(s"Knn method '$metric' not defined")
+    }
 
     val pwAffinities = pairwiseAffinities(knn, perplexity)
 

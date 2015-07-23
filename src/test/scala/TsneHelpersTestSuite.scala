@@ -21,13 +21,14 @@ package de.tu_berlin.dima.impro3
 import de.tu_berlin.dima.impro3.TsneHelpers._
 import org.apache.flink.api.scala._
 import org.apache.flink.ml.common.LabeledVector
+import org.apache.flink.ml.math.Breeze._
 import org.apache.flink.ml.math.{DenseVector, SparseVector}
 import org.apache.flink.ml.metrics.distances.SquaredEuclideanDistanceMetric
 import org.scalatest._
-import org.apache.flink.ml.math.Breeze._
 
 
 class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
+
   "kNearestNeighbors" should "return the k nearest neighbors for each SparseVector" in  {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
@@ -57,6 +58,23 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     results.size should equal (expectedResults.size)
     forAll(results) {expectedResults should contain (_)}
   }
+
+  /*"projectKnn" should "return the k nearest neighbors for each SparseVector" in  {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val neighbors = 2
+    val dimension = 4
+    val iterations = 4
+    val metric = SquaredEuclideanDistanceMetric()
+
+    val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
+
+    val results = projectKnn(input, neighbors, metric, dimension, iterations).collect()
+    val expectedResults = TsneHelpersTestSuite.knnResults
+
+    results.size should equal (expectedResults.size)
+    forAll(results) {expectedResults should contain (_)}
+  }*/
 
   "pairwiseAffinities" should "return the pairwise similarity p_i|j between datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment

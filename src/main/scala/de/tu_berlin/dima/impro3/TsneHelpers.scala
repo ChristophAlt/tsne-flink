@@ -90,6 +90,67 @@ object TsneHelpers {
     result
   }
 
+  def projectKnn(input: DataSet[LabeledVector], k: Int, metric: DistanceMetric, dimension: Int, iterations: Int): DataSet[(Long, Long, Double)] = {
+
+    val randomVectors: Seq[breeze.linalg.DenseVector[Double]] = for (_ <- 1 until iterations) yield {
+      breeze.linalg.DenseVector.rand[Double](dimension)
+    }
+
+    val nnInput = input.map(x => (x.label.toLong, x.vector, x.vector))
+
+    var possibleNeighbors = findPossibleNeighbors(nnInput, k, metric)
+
+    for (randomVector <- randomVectors) {
+      val projectedVectors = nnInput.map(x => (x._1, (x._2.asBreeze + randomVector).fromBreeze, x._2)).withForwardedFields("_1", "_2->_3")
+
+      possibleNeighbors = possibleNeighbors
+        .union(findPossibleNeighbors(projectedVectors, k, metric))
+    }
+
+    possibleNeighbors
+      .groupBy(x => (x._1, x._2)).reduceGroup {
+      (iter, out: Collector[(Long, Long, Vector, Vector)]) => {
+        if (iter.hasNext) {
+          out.collect(iter.next())
+        }
+      }
+    }.withForwardedFields("_1", "_2", "_3", "_4").groupBy(_._1).reduceGroup {
+      (iter, out: Collector[(Long, Long, Double)]) => {
+        if (iter.hasNext) {
+          val iterSeq = iter.toSeq
+          val distances = iterSeq.map(x => (x._1, x._2, metric.distance(x._3, x._4)))
+          val kNeighbors = distances.sortBy(_._3).take(k)
+          for (nn <- kNeighbors) {
+            out.collect(nn)
+          }
+        }
+      }
+    }
+  }
+
+  private def findPossibleNeighbors(input: DataSet[(Long, org.apache.flink.ml.math.Vector, org.apache.flink.ml.math.Vector)], k: Int, metric: DistanceMetric): DataSet[(Long, Long, Vector, Vector)] = {
+    input.reduceGroup {
+      (iter, out: Collector[(Long, Long, Vector, Vector)]) => {
+        if (iter.hasNext) {
+          val iterSeq = iter.toSeq
+          val sortedSeq = iterSeq.sortWith((v1, v2) => !ZOrder.compareByZorder(v1._2, v2._2))
+
+          for (i <- sortedSeq.indices) {
+            // take k items to the left
+            val left = sortedSeq.slice(i - k, i)
+            val right = sortedSeq.slice(i + 1, i + k + 1)
+            for (l <- left) {
+              out.collect((sortedSeq(i)._1, l._1, sortedSeq(i)._3, l._3))
+            }
+            for (r <- right) {
+              out.collect((sortedSeq(i)._1, r._1, sortedSeq(i)._3, r._3))
+            }
+          }
+        }
+      }
+    }
+  }
+
   def pairwiseAffinities(input: DataSet[(Long, Long, Double)], perplexity: Double):
   DataSet[(Long, Long, Double)] = {
     // compute pairwise affinities p_j|i
@@ -131,7 +192,7 @@ object TsneHelpers {
       private var gaussian: Random = null
 
       override def open(parameters: Configuration) {
-        gaussian = new Random(randomState)
+        gaussian = new Random(randomState ^ getRuntimeContext.getIndexOfThisSubtask)
       }
 
       def map(inp: LabeledVector): (Double, Vector, Vector, Vector) = {
