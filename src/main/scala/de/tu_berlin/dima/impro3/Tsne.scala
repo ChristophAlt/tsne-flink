@@ -55,11 +55,12 @@ object Tsne {
     val lossFile = parameters.get("loss", "loss.txt")
     val knnIterations = parameters.getLong("knnIterations", 3)
     val knnMethod = parameters.getRequired("knnMethod")
+    val knnBlocks = parameters.getLong("knnBlocks", env.getParallelism)
 
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
     val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
-      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta, knnMethod, knnIterations)
+      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta, knnMethod, knnIterations, knnBlocks)
 
     result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
@@ -95,7 +96,7 @@ object Tsne {
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
-                               finalMomentum: Double, theta: Double, knnMethod: String, knnIterations: Int):
+                               finalMomentum: Double, theta: Double, knnMethod: String, knnIterations: Int, knnBlocks: Int):
   DataSet[LabeledVector] = {
 
     //val centeredInput = centerInput(input)
@@ -104,7 +105,7 @@ object Tsne {
 
     val knn = knnMethod match {
       case "bruteforce" => kNearestNeighbors(input, neighbors, metric)
-      case "partition" => partitionKnn(input, neighbors, metric, env.getParallelism)
+      case "partition" => partitionKnn(input, neighbors, metric, knnBlocks)
       case "project" => projectKnn(input, neighbors, metric, inputDimension, knnIterations)
       case _ => throw new IllegalArgumentException(s"Knn method '$metric' not defined")
     }
