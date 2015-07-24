@@ -77,7 +77,18 @@ object TsneHelpers {
       }
     }
 
-    val result = crossed.groupBy(0).sortGroup(2, Order.ASCENDING).reduceGroup {
+    // try to combine group before reducing
+    val combinedResult = crossed.groupBy(0).sortGroup(2, Order.ASCENDING).combineGroup {
+      (iter, out: Collector[(Long, Long, Double)]) => {
+        if (iter.hasNext) {
+          for (n <- iter.take(k)) {
+            out.collect(n)
+          }
+        }
+      }
+    }
+
+    val result = combinedResult.groupBy(0).sortGroup(2, Order.ASCENDING).reduceGroup {
       (iter, out: Collector[(Long, Long, Double)]) => {
         if (iter.hasNext) {
           for (n <- iter.take(k)) {
