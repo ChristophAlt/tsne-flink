@@ -4,7 +4,7 @@ package de.tu_berlin.dima.impro3
  * Created by jguenthe on 20.07.2015.
  */
 
-import org.apache.flink.api.common.functions.RichMapFunction
+import org.apache.flink.api.common.functions.{RichFlatMapFunction, RichMapFunction}
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala.DataSetUtils._
 import org.apache.flink.api.scala._
@@ -12,6 +12,7 @@ import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.DenseVector
 import org.apache.flink.ml.metrics.distances.DistanceMetric
+import org.apache.flink.util
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
@@ -24,36 +25,38 @@ object zKnn extends Serializable {
    * Computes the nearest neighbors in the data-set for the data-point against which KNN
    * has to be applied
    *
-   * @param dataSet : RDD of Vectors of Int
-   * @param dataPoint : Vector of Int
-   * @param len : Number of data-points of the dataSet on which knnJoin is to be done
-   * @param randomSize : the number of iterations which has to be carried out
+   * @param input : RDD of Vectors of Int
+   * @param initPoint : Vector of Int
+   * @param k : Number of data-points of the dataSet on which knnJoin is to be done
+   * @param iterations : the number of iterations which has to be carried out
    *
    * @return an RDD of Vectors of Int on which simple KNN needs to be applied with respect
    *         to the data-point
    */
-  def knnJoin(dataSet: DataSet[LabeledVector],
-              dataPoint: LabeledVector,
-              len: Int,
-              randomSize: Int, metric: DistanceMetric): DataSet[LabeledVector] = {
-    val size = dataSet.first(1).collect().toSeq(0).vector.size
+  def knnJoin(input: DataSet[LabeledVector],
+              initPoint: LabeledVector,
+              k: Int,
+              iterations: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
+    val size = input.first(1).collect().toSeq(0).vector.size
     val rand = new Array[Int](size)
     val randomValue = new Random
 
-    val model = zScore.computeScore(dataSet)
-    val dataScore = zScore.scoreOfDataPoint(dataPoint.vector)
+    val model = zScore.computeScore(input)
+    val dataScore = zScore.scoreOfDataPoint(initPoint.vector)
 
     for (count <- 0 to size - 1) rand(count) = 0
 
-    var compute = knnJoin_perIteration(dataSet, dataPoint, DenseVector(rand), len, model, dataScore)
+    var compute = knnJoin_perIteration(input, initPoint, DenseVector(rand), k, model, dataScore)
     val bcKey = "RAND"
 
     //TODO replace with iterate
-    for (i <- 2 to randomSize) {
+
+    compute.iterate(iterations)
+    for (i <- 2 to iterations) {
       //random vector
       for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(10)
       var kLooped = -1
-      val updatedData: DataSet[LabeledVector] = dataSet.map(
+      val updatedData: DataSet[LabeledVector] = input.map(
         mapper = new RichMapFunction[LabeledVector, LabeledVector]() {
           var rand: mutable.Buffer[Array[Int]] = null
 
@@ -79,28 +82,20 @@ object zKnn extends Serializable {
       ).withBroadcastSet(ExecutionEnvironment.getExecutionEnvironment.fromElements(rand), bcKey) // 2. Broadcast the DataSet
 
 
-      val newDataValue = dataPoint.vector.map(word => word._2 + rand({
+      val newDataValue = initPoint.vector.map(word => word._2 + rand({
         kLooped = kLooped + 1
         kLooped % size
       })).toArray
 
-      val newDataPoint = new LabeledVector(dataPoint.label, DenseVector(newDataValue))
+      val newDataPoint = new LabeledVector(initPoint.label, DenseVector(newDataValue))
 
       //
       val modelLooped = zScore.computeScore(updatedData)
       val dataScorelooped = zScore.scoreOfDataPoint(newDataPoint.vector)
 
       val looped = knnJoin_perIteration(updatedData, newDataPoint, DenseVector(rand),
-        len, modelLooped, dataScorelooped)
+        k, modelLooped, dataScorelooped)
       var index = -1;
-      /*      val cleaned = looped.map(line => {
-              index = -1
-              val vec = line.vector.map(word => word._2.toInt - rand({
-                index = index + 1
-                index % size
-              })).toArray
-              new LabeledVector(line.label, DenseVector(vec))
-            })*/
 
       val cleaned = looped.map(mapper = new RichMapFunction[LabeledVector, LabeledVector] {
         var rand: mutable.Buffer[Array[Int]] = null
@@ -126,8 +121,32 @@ object zKnn extends Serializable {
       compute = compute.union(cleaned)
     }
 
-    //    zKNN(removeRedundantEntries(compute), dataPoint.vector, len, metric)
-    removeRedundantEntries(compute)
+    compute = removeRedundantEntries(compute)
+
+
+    //TODO Performance: I honestly don't know how fast this is going to be
+    val cleaned = input.flatMap(flatMapper = new RichFlatMapFunction[LabeledVector, (Long, Long, Double)] {
+      var reducedData: List[LabeledVector] = null
+
+      override def open(config: Configuration): Unit = {
+        reducedData = getRuntimeContext
+          .getBroadcastVariable[LabeledVector]("RESULT").asScala.toList
+      }
+
+      override def flatMap(dataPoint: LabeledVector, collector: util.Collector[(Long, Long, Double)]): Unit = {
+
+        val a = reducedData.map(word => metric.distance(dataPoint.vector, word.vector) -> word)
+          .sortBy(el => el._1)
+          .zipWithIndex.filter(wl => wl._2 < 150).map(el => (dataPoint.label.toLong, el._1._2.label.toLong, el._1._1))
+        for (el <- a) {
+          collector.collect(el)
+        }
+
+      }
+    }).withBroadcastSet(compute, "RESULT")
+
+
+    cleaned
   }
 
   /**
@@ -136,7 +155,7 @@ object zKnn extends Serializable {
    *
    * @param data : Dataset of Vectors of Int, which is the data-set in which knnJoin has to be
    *             undertaken
-   * @param dataPoint : Vector of Int, which is the data-point with which knnJoin is done 
+   * @param dataPoint : Vector of Int, which is the data-point with which knnJoin is done
    *                  with the data-set
    * @param randPoint : Vector of Int, it's the random vector generated in each iteration
    * @param len : The number of data-points from the data-set on which knnJoin is to be done
@@ -154,21 +173,16 @@ object zKnn extends Serializable {
                                    randPoint: org.apache.flink.ml.math.Vector,
                                    len: Int,
                                    zScore: DataSet[(Long, BigInt)],
-                                   dataScore: BigInt) = {
+                                   dataScore: BigInt):DataSet[LabeledVector] = {
 
     val greaterScoreTmp = zScore.filter(word => word._2 > dataScore).map(word => (word._2.bigInteger -> word._1)).
       sortPartition(0, Order.ASCENDING).map(w => (w._2))
 
-    println("Score: " + greaterScoreTmp.count())
 
     val greaterScore = greaterScoreTmp.zipWithIndex.map(el => el._2 -> el._1)
 
 
-    val lesserScoreTmp = zScore.filter(word => word._2 <= dataScore).map(wr => wr._1)
-
-    println("Lesser Score:" + lesserScoreTmp.count())
-
-    val lesserScore = lesserScoreTmp.zipWithIndex
+    val lesserScore = zScore.filter(word => word._2 <= dataScore).map(wr => wr._1).zipWithIndex
 
 
     if (greaterScore.count() > len && lesserScore.count() > len) {
@@ -213,11 +227,13 @@ object zKnn extends Serializable {
     }
 
   }
-
+  
   private def removeRedundantEntries(DataSet: DataSet[LabeledVector]): DataSet[LabeledVector] = {
     return DataSet.map(vr => (vr.label, vr.vector)).distinct(0).map(el => new LabeledVector(el._1, el._2))
   }
 
+
+/*
   def neighbors(reducedData: DataSet[LabeledVector],
                 dataPoint: org.apache.flink.ml.math.Vector
                 , k: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
@@ -226,7 +242,7 @@ object zKnn extends Serializable {
       .sortPartition(0, Order.ASCENDING)
       .zipWithIndex.filter(wl => wl._1 < k).map(wl => (dataPoint.size.toLong, wl._2._2.label.toLong, wl._2._1))
 
-    println("Got data " + distData.toString)
+
     distData
 
     /** Spark Code
@@ -237,6 +253,6 @@ object zKnn extends Serializable {
     distData
       */
 
-  }
+  }*/
 
 }

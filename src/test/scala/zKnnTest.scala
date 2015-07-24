@@ -1,4 +1,3 @@
-import de.tu_berlin.dima.impro3.TsneHelpers._
 import de.tu_berlin.dima.impro3.zKnn
 import de.tu_berlin.dima.impro3.zScore._
 import org.apache.flink.api.scala._
@@ -67,25 +66,32 @@ class zKnnTest extends FlatSpec with Matchers {
           LabeledVector(elementsIterable.head._1, SparseVector.fromCOO(1024, entries))
         })
 
-    val data = input.collect()
 
     val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 1, 1, 0)))
 
     println("Starting")
-    val results = zKnn.knnJoin(input, sample, 150, 6, new SquaredEuclideanDistanceMetric)
+    val results = zKnn.knnJoin(input, sample, 150, 6, new SquaredEuclideanDistanceMetric).collect();
+
+    /*
+    val neighborsE = data.map(el => zKnn.neighbors(results.setParallelism(1), el.vector, 150, metric)).reduce(
+      (a, b) => a.union(b)
+    ).collect()*/
+
+    //  var result = zKnn.neighbors(results, data.head.vector, 150, metric)
 
 
-    val neighborsE = data.map(el => zKnn.neighbors(results, el.vector, 150, metric))
+    var endTime = new Duration(startTime, DateTime.now())
 
 
-    val endTime = new Duration(DateTime.now, startTime)
 
     println("Run Time(Seconds):" + endTime.getStandardSeconds)
+
+    //  println("Resultsize:" + neighborsE.size)
 
 
   }
 
-
+  /*
   "kNearestNeighbors" should "return the k nearest neighbors for each SparseVector" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
@@ -107,7 +113,7 @@ class zKnnTest extends FlatSpec with Matchers {
     val results = kNearestNeighbors(input, neighbors, metric).collect()
     val overallTime = new Duration(startTime, DateTime.now())
 
-  }
+  }*/
 
 
 }
