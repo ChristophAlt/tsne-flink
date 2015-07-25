@@ -120,7 +120,19 @@ object Tsne {
 
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
 
-    optimize(jntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
-      initialMomentum, finalMomentum, theta)
+    val svJntDistribution: DataSet[(Int, Vector[Double])] = jntDistribution.groupBy(0).reduceGroup {
+      entries =>
+        val vectorBuilder = new VectorBuilder[Double](inputDimension * inputDimension)
+        val first = entries.next()
+        vectorBuilder.add(first._2, first._3)
+        while (entries.hasNext) {
+          val entry = entries.next()
+          vectorBuilder.add(entry._2, entry._3)
+        }
+        (first._1, vectorBuilder.toSparseVector)
+    }
+
+    optimize(svJntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
+      initialMomentum, finalMomentum, theta, nComponents)
   }
 }

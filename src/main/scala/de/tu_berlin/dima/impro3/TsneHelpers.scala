@@ -207,8 +207,8 @@ object TsneHelpers {
     })
   }
 
-  def gradient(highDimAffinities: DataSet[(Int, Int, Double)], embedding: DataSet[(Int, Vector[Double])],
-               metric: (Vector[Double], Vector[Double]) => Double, theta: Double, iterOffset: Int=0):
+  def gradient(highDimAffinities: DataSet[(Int, Vector[Double])], embedding: DataSet[(Int, Vector[Double])],
+               metric: (Vector[Double], Vector[Double]) => Double, theta: Double, dimension:Int, iterOffset: Int=0):
     DataSet[(Int, Vector[Double])] = {
 
     // find xMin, xMax, yMin and yMax, as well as meanX and meanY
@@ -263,7 +263,7 @@ object TsneHelpers {
 
     // compute attracting forces
     val attrForces = highDimAffinities
-      .map(new RichMapFunction[(Int, Int, Double), (Int, Vector[Double])] {
+      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double])] {
       private var embedding: Map[Int, Vector[Double]] = null
       private val lossAccumulator = new MapAccumulator()
       private var currentIteration = 0
@@ -277,25 +277,34 @@ object TsneHelpers {
         getRuntimeContext.addAccumulator("loss", lossAccumulator)
       }
 
-      def map(pij: (Int, Int, Double)): (Int, Vector[Double]) = {
-        val i = pij._1
-        val j = pij._2
-        val p = pij._3
+      def map(pi: (Int, Vector[Double])): (Int, Vector[Double]) = {
+        val i = pi._1
+        val p = pi._2.asInstanceOf[SparseVector[Double]]
 
-        val q = 1 / (1 + metric(embedding(i), embedding(j)))
+        var partialGradient = DenseVector.fill(dimension, 0.0)
 
-        if ((currentIteration + iterOffset) % 10 == 0) {
-          val partialLoss = p * scala.math.log(p / (q / sumQ))
-          lossAccumulator.add((currentIteration + iterOffset, partialLoss))
+        var offset = 0
+        while(offset < p.activeSize) {
+          val j = p.indexAt(offset)
+          val pij = p.valueAt(offset)
+
+          val qij = 1 / (1 + metric(embedding(i), embedding(j)))
+
+          partialGradient += pij * qij * (embedding(i) - embedding(j))
+
+          if ((currentIteration + iterOffset) % 10 == 0) {
+            val partialLoss = pij * scala.math.log(pij / (qij / sumQ))
+            lossAccumulator.add((currentIteration + iterOffset, partialLoss))
+          }
+
+          offset += 1
         }
-
-        val partialGradient = p * q * (embedding(i) - embedding(j))
 
         (i, partialGradient)
       }
     }).withBroadcastSet(embedding, "embedding")
       .withBroadcastSet(sumQ, "sumQ")
-      .groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2 + v2._2))
+      //.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2 + v2._2))
 
     // put everything together
     attrForces.join(repForcesAndSum).where(0).equalTo(0)
@@ -367,8 +376,8 @@ object TsneHelpers {
   
   def iterationComputation (iterations: Int, momentum: Double,
                             workingSet:DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
-                            highdimAffinites: DataSet[(Int, Int, Double)], metric: (Vector[Double], Vector[Double]) => Double,
-                            learningRate: Double, theta: Double, iterOffset: Int=0) = {
+                            highdimAffinites: DataSet[(Int, Vector[Double])], metric: (Vector[Double], Vector[Double]) => Double,
+                            learningRate: Double, theta: Double, dimension: Int, iterOffset: Int) = {
 
     workingSet.iterate(iterations) {
       // (index, embedding, gradient, gains)
@@ -376,7 +385,7 @@ object TsneHelpers {
 
       val currentEmbedding = workingSet.map(t => (t._1, t._2))
 
-      val dY = gradient(highdimAffinites, currentEmbedding, metric, theta, iterOffset)
+      val dY = gradient(highdimAffinites, currentEmbedding, metric, theta, dimension ,iterOffset)
 
       val minGain = 0.01
 
@@ -388,10 +397,10 @@ object TsneHelpers {
     }
   }
 
-  def optimize(highDimAffinities: DataSet[(Int, Int, Double)],
+  def optimize(highDimAffinities: DataSet[(Int, Vector[Double])],
                initialWorkingSet: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
                learningRate: Double, iterations: Int, metric: (Vector[Double], Vector[Double]) => Double,
-               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double, theta: Double):
+               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double, theta: Double, dimension: Int):
   DataSet[(Int, Vector[Double])] = {
 
     val iterInitMomentumExaggeration = scala.math.min(iterations, 20)
@@ -401,22 +410,22 @@ object TsneHelpers {
     var embedding: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = null
 
     // early exaggeration
-    val exaggeratedAffinities = highDimAffinities.map(x => (x._1, x._2, x._3 * earlyExaggeration))
+    val exaggeratedAffinities = highDimAffinities.map(x => (x._1, x._2 * earlyExaggeration))
 
     // iterate with initial momentum and exaggerated input
     embedding = iterationComputation(iterInitMomentumExaggeration, initialMomentum,
-      initialWorkingSet, exaggeratedAffinities, metric, learningRate, theta, 0)
+      initialWorkingSet, exaggeratedAffinities, metric, learningRate, theta, dimension, 0)
 
     if (iterExaggeration > 0) {
       // iterate with final momentum and exaggerated input
       embedding = iterationComputation(iterExaggeration, finalMomentum, embedding, exaggeratedAffinities,
-        metric, learningRate, theta, iterInitMomentumExaggeration)
+        metric, learningRate, theta, dimension, iterInitMomentumExaggeration)
     }
 
     // iterate with final momentum and standard input
     if (iterWoExaggeration > 0) {
       embedding = iterationComputation(iterWoExaggeration, finalMomentum, embedding, highDimAffinities,
-        metric, learningRate, theta, iterExaggeration + iterInitMomentumExaggeration)
+        metric, learningRate, theta, dimension, iterExaggeration + iterInitMomentumExaggeration)
     }
 
     embedding.map(x => (x._1, x._2))

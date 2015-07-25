@@ -185,13 +185,25 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
+    val svJntDistribution: DataSet[(Int, Vector[Double])] = jointDistribution.groupBy(0).reduceGroup {
+      entries =>
+        val vectorBuilder = new VectorBuilder[Double](28*28)
+        val first = entries.next()
+        vectorBuilder.add(first._2, first._3)
+        while (entries.hasNext) {
+          val entry = entries.next()
+          vectorBuilder.add(entry._2, entry._3)
+        }
+        (first._1, vectorBuilder.toSparseVector)
+    }
+
     val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
     // the result of setting theta to zero is the same as not using a quad-tree at all
     val theta = 0.0
 
     val grad = embedding.iterate(1) {
       currentEmbedding =>
-        gradient(jointDistribution, currentEmbedding, Tsne.getMetric("sqeucledian"), theta)
+        gradient(svJntDistribution, currentEmbedding, Tsne.getMetric("sqeucledian"), theta, 2)
     }
 
     val results = grad.collect()
@@ -283,6 +295,17 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val theta = 0.0
 
     val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
+    val svJntDistribution: DataSet[(Int, Vector[Double])] = jointDistribution.groupBy(0).reduceGroup {
+      entries =>
+        val vectorBuilder = new VectorBuilder[Double](28*28)
+        val first = entries.next()
+        vectorBuilder.add(first._2, first._3)
+        while (entries.hasNext) {
+          val entry = entries.next()
+          vectorBuilder.add(entry._2, entry._3)
+        }
+        (first._1, vectorBuilder.toSparseVector)
+    }
 
     val initialEmbeddingSeq = TsneHelpersTestSuite.initialEmbedding
 
@@ -296,7 +319,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val workingSet = env.fromCollection(workingSetSeq)
 
-    val results = iterationComputation(iterations, momentum, workingSet, jointDistribution, metric, learningRate, theta)
+    val results = iterationComputation(iterations, momentum, workingSet, svJntDistribution, metric, learningRate, theta, 2, 0)
       .map(x => (x._1, x._2)).collect()
 
     val expectedResults = TsneHelpersTestSuite.updatedAndCentredEmbeddingResults
