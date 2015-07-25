@@ -84,6 +84,9 @@ class zKnnTest extends FlatSpec with Matchers {
 
 
 
+
+
+    results.sortBy(el => el._1).take(1000).foreach(el => println("ID 1: " + el._1 + " ID 2" + el._2 + " Val:" + el._3))
     println("Run Time(Seconds):" + endTime.getStandardSeconds)
 
     //  println("Resultsize:" + neighborsE.size)

@@ -35,7 +35,7 @@ object zKnn extends Serializable {
   def knnJoin(input: DataSet[LabeledVector],
               k: Int,
               iterations: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
-    val initPoint = input.first(15).collect().toSeq(14)
+    val initPoint = input.first(3).collect().toSeq(1)
     val size = initPoint.vector.size
     val rand = new Array[Int](size)
     val randomValue = new Random
@@ -53,7 +53,7 @@ object zKnn extends Serializable {
 
     for (i <- 2 to iterations) {
       //random vector
-      for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(10)
+      for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(10000)
       var kLooped = -1
       val updatedData: DataSet[LabeledVector] = input.map(
         mapper = new RichMapFunction[LabeledVector, LabeledVector]() {
@@ -138,8 +138,7 @@ object zKnn extends Serializable {
       }
 
       override def flatMap(dataPoint: LabeledVector, collector: util.Collector[(Long, Long, Double)]): Unit = {
-
-        val a = reducedData.map(word => metric.distance(dataPoint.vector, word.vector) -> word)
+        val a = reducedData.map(word => metric.distance(dataPoint.vector, word.vector) -> word).filter(el => el._1 > 0)
           .sortBy(el => el._1)
           .zipWithIndex.filter(wl => wl._2 < k).map(el => (dataPoint.label.toLong, el._1._2.label.toLong, el._1._1))
         for (el <- a) {
@@ -232,12 +231,12 @@ object zKnn extends Serializable {
 
   }
 
-  private def removeRedundantEntries(DataSet: DataSet[LabeledVector]): DataSet[LabeledVector] = {
-    return DataSet.map(vr => (vr.label, vr.vector)).distinct(0).map(el => new LabeledVector(el._1, el._2))
+  private def removeRedundantEntries(data: DataSet[LabeledVector]): DataSet[LabeledVector] = {
+    data.map(vr => vr.label -> vr).distinct(0).map(el => el._2)
   }
 
 
-  /*
+
     def neighbors(reducedData: DataSet[LabeledVector],
                   dataPoint: org.apache.flink.ml.math.Vector
                   , k: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
@@ -257,6 +256,6 @@ object zKnn extends Serializable {
       distData
         */
 
-    }*/
+    }
 
 }
