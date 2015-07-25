@@ -70,7 +70,7 @@ class zKnnTest extends FlatSpec with Matchers {
     val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 1, 1, 0)))
 
     println("Starting")
-    val results = zKnn.knnJoin(input, sample, 150, 6, new SquaredEuclideanDistanceMetric).collect();
+    val results = zKnn.knnJoin(input, 150, 6, new SquaredEuclideanDistanceMetric).collect();
 
     /*
     val neighborsE = data.map(el => zKnn.neighbors(results.setParallelism(1), el.vector, 150, metric)).reduce(
@@ -84,6 +84,9 @@ class zKnnTest extends FlatSpec with Matchers {
 
 
 
+
+
+    results.sortBy(el => el._1).take(1000).foreach(el => println("ID 1: " + el._1 + " ID 2" + el._2 + " Val:" + el._3))
     println("Run Time(Seconds):" + endTime.getStandardSeconds)
 
     //  println("Resultsize:" + neighborsE.size)

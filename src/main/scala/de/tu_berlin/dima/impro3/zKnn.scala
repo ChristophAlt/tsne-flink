@@ -11,7 +11,7 @@ import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.DenseVector
-import org.apache.flink.ml.metrics.distances.DistanceMetric
+import org.apache.flink.ml.metrics.distances.{EuclideanDistanceMetric, DistanceMetric}
 import org.apache.flink.util
 
 import scala.collection.JavaConverters._
@@ -26,7 +26,6 @@ object zKnn extends Serializable {
    * has to be applied
    *
    * @param input : RDD of Vectors of Int
-   * @param initPoint : Vector of Int
    * @param k : Number of data-points of the dataSet on which knnJoin is to be done
    * @param iterations : the number of iterations which has to be carried out
    *
@@ -34,10 +33,10 @@ object zKnn extends Serializable {
    *         to the data-point
    */
   def knnJoin(input: DataSet[LabeledVector],
-              initPoint: LabeledVector,
               k: Int,
               iterations: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
-    val size = input.first(1).collect().toSeq(0).vector.size
+    val initPoint = input.first(3).collect().toSeq(1)
+    val size = initPoint.vector.size
     val rand = new Array[Int](size)
     val randomValue = new Random
 
@@ -51,10 +50,10 @@ object zKnn extends Serializable {
 
     //TODO replace with iterate
 
-    compute.iterate(iterations)
+
     for (i <- 2 to iterations) {
       //random vector
-      for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(10)
+      for (i <- 0 to size - 1) rand(i) = randomValue.nextInt(10000)
       var kLooped = -1
       val updatedData: DataSet[LabeledVector] = input.map(
         mapper = new RichMapFunction[LabeledVector, LabeledVector]() {
@@ -124,26 +123,31 @@ object zKnn extends Serializable {
     compute = removeRedundantEntries(compute)
 
 
+    val cof = new Configuration
+    cof.setInteger("k", k)
+
     //TODO Performance: I honestly don't know how fast this is going to be
     val cleaned = input.flatMap(flatMapper = new RichFlatMapFunction[LabeledVector, (Long, Long, Double)] {
       var reducedData: List[LabeledVector] = null
-
+      var k = 0
+      var metric: DistanceMetric = new EuclideanDistanceMetric
       override def open(config: Configuration): Unit = {
         reducedData = getRuntimeContext
           .getBroadcastVariable[LabeledVector]("RESULT").asScala.toList
+        k = config.getInteger("k", 0)
+
       }
 
       override def flatMap(dataPoint: LabeledVector, collector: util.Collector[(Long, Long, Double)]): Unit = {
-
-        val a = reducedData.map(word => metric.distance(dataPoint.vector, word.vector) -> word)
+        val a = reducedData.map(word => metric.distance(dataPoint.vector, word.vector) -> word).filter(el => el._1 > 0)
           .sortBy(el => el._1)
-          .zipWithIndex.filter(wl => wl._2 < 150).map(el => (dataPoint.label.toLong, el._1._2.label.toLong, el._1._1))
+          .zipWithIndex.filter(wl => wl._2 < k).map(el => (dataPoint.label.toLong, el._1._2.label.toLong, el._1._1))
         for (el <- a) {
           collector.collect(el)
         }
 
       }
-    }).withBroadcastSet(compute, "RESULT")
+    }).withBroadcastSet(compute, "RESULT").withParameters(cof)
 
 
     cleaned
@@ -173,7 +177,7 @@ object zKnn extends Serializable {
                                    randPoint: org.apache.flink.ml.math.Vector,
                                    len: Int,
                                    zScore: DataSet[(Long, BigInt)],
-                                   dataScore: BigInt):DataSet[LabeledVector] = {
+                                   dataScore: BigInt): DataSet[LabeledVector] = {
 
     val greaterScoreTmp = zScore.filter(word => word._2 > dataScore).map(word => (word._2.bigInteger -> word._1)).
       sortPartition(0, Order.ASCENDING).map(w => (w._2))
@@ -227,13 +231,12 @@ object zKnn extends Serializable {
     }
 
   }
-  
-  private def removeRedundantEntries(DataSet: DataSet[LabeledVector]): DataSet[LabeledVector] = {
-    return DataSet.map(vr => (vr.label, vr.vector)).distinct(0).map(el => new LabeledVector(el._1, el._2))
+
+  private def removeRedundantEntries(data: DataSet[LabeledVector]): DataSet[LabeledVector] = {
+    data.map(vr => vr.label -> vr).distinct(0).map(el => el._2)
   }
 
 
-/*
   def neighbors(reducedData: DataSet[LabeledVector],
                 dataPoint: org.apache.flink.ml.math.Vector
                 , k: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
@@ -247,12 +250,12 @@ object zKnn extends Serializable {
 
     /** Spark Code
       * val distData = reducedData.map(word => euclideanDist(dataPoint, word) -> word)
-            .sortByKey(true)
-            .zipWithIndex()
-            .filter(word => word._2 < k).map(word => word._1._2)
-    distData
+              .sortByKey(true)
+              .zipWithIndex()
+              .filter(word => word._2 < k).map(word => word._1._2)
+      distData
       */
 
-  }*/
+  }
 
 }

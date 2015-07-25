@@ -57,8 +57,8 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val sample = new LabeledVector(Random.nextDouble(), DenseVector(Array(1, 5, 3)))
 
     val len = 3
-    val iter = 4
-    val results = zKnn.knnJoin(input, sample, len, iter, metric).collect()
+    val iter = 3
+    val results = zKnn.knnJoin(input, neighbors, iter, metric).collect()
     val expectedResults = TsneHelpersTestSuite.knnResults
 
     results.size should equal(expectedResults.size)
