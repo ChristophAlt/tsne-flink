@@ -125,7 +125,6 @@ object zKnn extends Serializable {
 
     val cof = new Configuration
     cof.setInteger("k", k)
-    cof.setClass("metric", metric.getClass)
 
     //TODO Performance: I honestly don't know how fast this is going to be
     val cleaned = input.flatMap(flatMapper = new RichFlatMapFunction[LabeledVector, (Long, Long, Double)] {
