@@ -18,13 +18,13 @@
 
 package de.tu_berlin.dima.impro3
 
-import org.apache.flink.ml.math.Vector
-
+import breeze.linalg.Vector
 
 object ZOrder {
   // returns true if Vector a greater Vector b
-  def compareByZorder(a: Vector, b: Vector): Boolean = {
-    require(a.size == b.size, "The each size of vectors must be same to calculate distance.")
+  def compareByZorder(a: Vector[Double], b: Vector[Double]): Boolean = {
+
+    require(a.size == b.size, "Both vectors must be of same length")
     var j = 0
     var x = 0L
     for (i <- 0 until a.size) {

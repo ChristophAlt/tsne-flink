@@ -18,35 +18,31 @@
 
 package de.tu_berlin.dima.impro3
 
-import org.apache.flink.api.common.accumulators.DoubleCounter
+import breeze.linalg._
+import breeze.stats.distributions.Rand
 import org.apache.flink.api.common.functions.{RichGroupReduceFunction, RichMapFunction}
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml._
-import org.apache.flink.ml.common.{FlinkMLTools, LabeledVector}
-import org.apache.flink.ml.math.Breeze._
-import org.apache.flink.ml.math.{DenseVector, Vector}
-import org.apache.flink.ml.metrics.distances.DistanceMetric
+import org.apache.flink.ml.common.FlinkMLTools
 import org.apache.flink.util.Collector
 
 import scala.collection.JavaConverters._
-import scala.math._
-import scala.util.Random
 
 
 object TsneHelpers {
 
   //============================= TSNE steps ===============================================//
 
-  def kNearestNeighbors(input: DataSet[LabeledVector], k: Int, metric: DistanceMetric):
-  DataSet[(Long, Long, Double)] = {
+  def kNearestNeighbors(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double):
+  DataSet[(Int, Int, Double)] = {
     // compute k nearest neighbors for all points
     input
       .cross(input) {
       (v1, v2) =>
         //   i         j     /----------------- d ----------------\
-        (v1.label.toLong, v2.label.toLong, metric.distance(v1.vector, v2.vector))
+        (v1._1, v2._1, metric(v1._2, v2._2))
     }
       // remove distances == 0
       .filter(x => x._1 != x._2)
@@ -58,38 +54,26 @@ object TsneHelpers {
       .first(k)
   }
 
-  def partitionKnn(input: DataSet[LabeledVector], k: Int, metric: DistanceMetric, blocks: Int): DataSet[(Long, Long, Double)] = {
-    val inputWithIndex = input.map(x => (x.label.toLong, x.vector))
+  def partitionKnn(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double, blocks: Int):
+  DataSet[(Int, Int, Double)] = {
 
     val partitioner = FlinkMLTools.ModuloKeyPartitioner
-
-    val inputSplit = FlinkMLTools.block(inputWithIndex, blocks, Some(partitioner))
+    val inputSplit = FlinkMLTools.block(input, blocks, Some(partitioner))
 
     val crossed = inputSplit.cross(inputSplit).mapPartition {
-      (iter, out: Collector[(Long, Long, Double)]) => {
+      (iter, out: Collector[(Int, Int, Double)]) => {
         for ((split1, split2) <- iter) {
           for (a <- split1.values; b <- split2.values) {
             if (a._1 != b._1) {
-              out.collect(a._1, b._1, metric.distance(a._2, b._2))
+              out.collect(a._1, b._1, metric(a._2, b._2))
             }
           }
         }
       }
     }
 
-    // try to combine group before reducing
-    val combinedResult = crossed.groupBy(0).sortGroup(2, Order.ASCENDING).combineGroup {
-      (iter, out: Collector[(Long, Long, Double)]) => {
-        if (iter.hasNext) {
-          for (n <- iter.take(k)) {
-            out.collect(n)
-          }
-        }
-      }
-    }
-
-    val result = combinedResult.groupBy(0).sortGroup(2, Order.ASCENDING).reduceGroup {
-      (iter, out: Collector[(Long, Long, Double)]) => {
+    val result = crossed.groupBy(0).sortGroup(2, Order.ASCENDING).reduceGroup {
+      (iter, out: Collector[(Int, Int, Double)]) => {
         if (iter.hasNext) {
           for (n <- iter.take(k)) {
             out.collect(n)
@@ -101,18 +85,19 @@ object TsneHelpers {
     result
   }
 
-  def projectKnn(input: DataSet[LabeledVector], k: Int, metric: DistanceMetric, dimension: Int, iterations: Int): DataSet[(Long, Long, Double)] = {
+  def projectKnn(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double, dimension: Int,
+                 iterations: Int): DataSet[(Int, Int, Double)] = {
 
-    val randomVectors: Seq[breeze.linalg.DenseVector[Double]] = for (_ <- 1 until iterations) yield {
-      breeze.linalg.DenseVector.rand[Double](dimension)
+    val randomVectors: Seq[DenseVector[Double]] = for (_ <- 1 until iterations) yield {
+      DenseVector.rand[Double](dimension)
     }
 
-    val nnInput = input.map(x => (x.label.toLong, x.vector, x.vector))
+    val nnInput = input.map(x => (x._1, x._2, x._2))
 
     var possibleNeighbors = findPossibleNeighbors(nnInput, k, metric)
 
     for (randomVector <- randomVectors) {
-      val projectedVectors = nnInput.map(x => (x._1, (x._2.asBreeze + randomVector).fromBreeze, x._2)).withForwardedFields("_1", "_2->_3")
+      val projectedVectors = nnInput.map(x => (x._1, x._2 + randomVector, x._2)).withForwardedFields("_1", "_2->_3")
 
       possibleNeighbors = possibleNeighbors
         .union(findPossibleNeighbors(projectedVectors, k, metric))
@@ -120,16 +105,16 @@ object TsneHelpers {
 
     possibleNeighbors
       .groupBy(x => (x._1, x._2)).reduceGroup {
-      (iter, out: Collector[(Long, Long, Vector, Vector)]) => {
+      (iter, out: Collector[(Int, Int, Vector[Double], Vector[Double])]) => {
         if (iter.hasNext) {
           out.collect(iter.next())
         }
       }
     }.withForwardedFields("_1", "_2", "_3", "_4").groupBy(_._1).reduceGroup {
-      (iter, out: Collector[(Long, Long, Double)]) => {
+      (iter, out: Collector[(Int, Int, Double)]) => {
         if (iter.hasNext) {
           val iterSeq = iter.toSeq
-          val distances = iterSeq.map(x => (x._1, x._2, metric.distance(x._3, x._4)))
+          val distances = iterSeq.map(x => (x._1, x._2, metric(x._3, x._4)))
           val kNeighbors = distances.sortBy(_._3).take(k)
           for (nn <- kNeighbors) {
             out.collect(nn)
@@ -139,9 +124,11 @@ object TsneHelpers {
     }
   }
 
-  private def findPossibleNeighbors(input: DataSet[(Long, org.apache.flink.ml.math.Vector, org.apache.flink.ml.math.Vector)], k: Int, metric: DistanceMetric): DataSet[(Long, Long, Vector, Vector)] = {
+  private def findPossibleNeighbors(input: DataSet[(Int, Vector[Double], Vector[Double])], k: Int,
+                            metric: (Vector[Double], Vector[Double]) => Double): DataSet[(Int, Int, Vector[Double], Vector[Double])] = {
+
     input.reduceGroup {
-      (iter, out: Collector[(Long, Long, Vector, Vector)]) => {
+      (iter, out: Collector[(Int, Int, Vector[Double], Vector[Double])]) => {
         if (iter.hasNext) {
           val iterSeq = iter.toSeq
           val sortedSeq = iterSeq.sortWith((v1, v2) => !ZOrder.compareByZorder(v1._2, v2._2))
@@ -162,8 +149,8 @@ object TsneHelpers {
     }
   }
 
-  def pairwiseAffinities(input: DataSet[(Long, Long, Double)], perplexity: Double):
-  DataSet[(Long, Long, Double)] = {
+  def pairwiseAffinities(input: DataSet[(Int, Int, Double)], perplexity: Double):
+  DataSet[(Int, Int, Double)] = {
     // compute pairwise affinities p_j|i
     input
       // group on i
@@ -171,7 +158,7 @@ object TsneHelpers {
       // compute pairwise affinities for each point i
       // binary search for sigma_i and the result is p_j|i
       .reduceGroup {
-      (knn, affinities: Collector[(Long, Long, Double)]) =>
+      (knn, affinities: Collector[(Int, Int, Double)]) =>
         val knnSeq = knn.toSeq
         // do a binary search to find sigma_i resulting in given perplexity
         // return pairwise affinities
@@ -182,91 +169,55 @@ object TsneHelpers {
     }
   }
 
-  def jointDistribution(input: DataSet[(Long, Long, Double)]): DataSet[(Long, Long, Double)] = {
+  def jointDistribution(input: DataSet[(Int, Int, Double)]): DataSet[(Int, Int, Double)] = {
 
     val inputTransposed =
       input.map(x => (x._2, x._1, x._3))
 
-    val jointDistribution =
+    val jointDistrib =
       input.union(inputTransposed).groupBy(0, 1).reduce((x, y) => (x._1, x._2, x._3 + y._3))
 
     // collect the sum over the joint distribution for normalization
-    val sumP = jointDistribution.sum(2).map(x => max(x._3, Double.MinValue))
+    val sumP = jointDistrib.sum(2).map(x => scala.math.max(x._3, Double.MinValue))
 
-    jointDistribution.mapWithBcVariable(sumP) { (p, sumP) => (p._1, p._2, max(p._3 / sumP, Double.MinValue)) }
+    jointDistrib.mapWithBcVariable(sumP) {
+      (p, sumP) => (p._1, p._2, scala.math.max(p._3 / sumP, Double.MinValue))
+    }
   }
 
-  def initWorkingSet(input: DataSet[LabeledVector], nComponents: Int, randomState: Int): DataSet[(Double, Vector, Vector, Vector)] = {
+  def initWorkingSet(input: DataSet[(Int, Vector[Double])], nComponents: Int, randomState: Int):
+  DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
     // init Y (embedding) by sampling from N(0, I)
     input
-      .map(new RichMapFunction[LabeledVector, (Double, Vector, Vector, Vector)] {
-      private var gaussian: Random = null
+      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double], Vector[Double], Vector[Double])] {
+      private var gaussian: Rand[Double] = null
 
       override def open(parameters: Configuration) {
-        gaussian = new Random(randomState ^ getRuntimeContext.getIndexOfThisSubtask)
+        gaussian = Rand.gaussian(0, 1e-4)
       }
 
-      def map(inp: LabeledVector): (Double, Vector, Vector, Vector) = {
+      def map(inp: (Int, Vector[Double])): (Int, Vector[Double], Vector[Double], Vector[Double]) = {
 
-        val y = breeze.linalg.DenseVector.rand[Double](nComponents)
-        val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
-        val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
+        val y = DenseVector.rand[Double](nComponents, gaussian)
+        val lastGradient = DenseVector.fill(nComponents, 0.0)
+        val gains = DenseVector.fill(nComponents, 1.0)
         
-        (inp.label, y.fromBreeze, lastGradient.fromBreeze, gains.fromBreeze)
+        (inp._1, y, lastGradient, gains)
       }
     })
   }
 
-  def computeDistances(points: DataSet[LabeledVector], metric: DistanceMetric):
-  DataSet[(Long, Long, Double, Vector)] = {
-    val distances = points
-      .cross(points) {
-      (e1, e2) =>
-        //   i         j      /----------------- d ---------------\ /---------- difference vector----------\
-        (e1.label.toLong, e2.label.toLong, metric.distance(e1.vector, e2.vector), (e1.vector.asBreeze - e2.vector.asBreeze).fromBreeze)
-    } // remove distances == 0
-      .filter(x => x._1 != x._2)
-
-    distances
-  }
-
-  def sumLowDimAffinities(embedding: DataSet[LabeledVector], metric: DistanceMetric): DataSet[Double] = {
-    embedding
-      .map(new RichMapFunction[LabeledVector, Double] {
-      private var embedding: Traversable[LabeledVector] = null
-
-      override def open(parameters: Configuration) {
-        embedding = getRuntimeContext
-          .getBroadcastVariable[LabeledVector]("embedding").asScala
-      }
-
-      def map(vector: LabeledVector): Double = {
-        val leftVector = vector.vector
-        val index = vector.label
-        embedding
-          .map(rightVector => {
-            if (index != rightVector.label) {
-              1 / (1 + metric.distance(leftVector, rightVector.vector))
-            } else {
-              0.0
-            }
-        }).sum
-      }
-    }).withBroadcastSet(embedding, "embedding")
-    .reduce((x, y) => x + y)
-  }
-
-  def gradient(highDimAffinities: DataSet[(Long, Long, Double)], embedding: DataSet[LabeledVector],
-               metric: DistanceMetric, sumOverAllAffinities: DataSet[Double], theta: Double, iterOffset: Int=0):
-    DataSet[LabeledVector] = {
+  def gradient(highDimAffinities: DataSet[(Int, Int, Double)], embedding: DataSet[(Int, Vector[Double])],
+               metric: (Vector[Double], Vector[Double]) => Double, theta: Double, iterOffset: Int=0):
+    DataSet[(Int, Vector[Double])] = {
 
     // find xMin, xMax, yMin and yMax, as well as meanX and meanY
-    val boundaryAndMean = embedding.map(x => (x.vector(0), x.vector(0), x.vector(1), x.vector(1), x.vector(0), x.vector(1), 1))
-      .reduce((x, y) => (min(x._1, y._1), max(x._2, y._2), min(x._3, y._3), max(x._4, y._4), x._5 + y._5, x._6 + y._6, x._7 + y._7))
+    val boundaryAndMean = embedding.map(x => (x._2(0), x._2(0), x._2(1), x._2(1), x._2(0), x._2(1), 1))
+      .reduce((x, y) => (scala.math.min(x._1, y._1), scala.math.max(x._2, y._2), scala.math.min(x._3, y._3), scala.math.max(x._4, y._4), x._5 + y._5, x._6 + y._6, x._7 + y._7))
 
     // compute repulsive forces
     val tree = embedding
-      .reduceGroup(new RichGroupReduceFunction[LabeledVector, QuadTree] {
+      .reduceGroup(new RichGroupReduceFunction[(Int, Vector[Double]), QuadTree] {
       private var boundaryAndMean: (Double, Double, Double, Double, Double, Double, Int) = null
 
       override def open(parameters: Configuration) {
@@ -274,16 +225,16 @@ object TsneHelpers {
           .getBroadcastVariable[(Double, Double, Double, Double, Double, Double, Int)]("boundaryAndMean").get(0)
       }
 
-      def reduce(embedding: java.lang.Iterable[LabeledVector],
+      def reduce(embedding: java.lang.Iterable[(Int, Vector[Double])],
                   out: Collector[QuadTree]) = {
         val (minX, maxX, minY, maxY, sumX, sumY, count) = boundaryAndMean
 
         val meanX = sumX / count
         val meanY = sumY / count
-        val tree = QuadTree(None, Cell(meanX, meanY, max(maxX - minX, maxY - minY)))
+        val tree = QuadTree(None, Cell(meanX, meanY, scala.math.max(maxX - minX, maxY - minY)))
 
         for (v <- embedding.asScala) {
-          tree.insert(v.vector.asBreeze)
+          tree.insert(v._2)
         }
         out.collect(tree)
       }
@@ -291,19 +242,20 @@ object TsneHelpers {
 
     // compute repulsive forces
     val repForcesAndSum = embedding
-      .map(new RichMapFunction[LabeledVector, (Long, Vector, Double)] {
+      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double], Double)] {
       private var tree: QuadTree = null
 
       override def open(parameters: Configuration) {
         tree = getRuntimeContext.getBroadcastVariable[QuadTree]("tree").get(0)
       }
 
-      def map(vector: LabeledVector): (Long, Vector, Double) = {
-        val leftVector = vector.vector
-        val index = vector.label.toLong
+      def map(vector: (Int, Vector[Double])): (Int, Vector[Double], Double) = {
+        val index = vector._1
+        val leftVector = vector._2
 
-        val (repForce, sumQ) = tree.computeRepulsiveForce(leftVector.asBreeze, theta)
-        (index, repForce.fromBreeze, sumQ)
+
+        val (repForce, sumQ) = tree.computeRepulsiveForce(leftVector, theta)
+        (index, repForce, sumQ)
       }
     }).withBroadcastSet(tree, "tree")
 
@@ -311,81 +263,84 @@ object TsneHelpers {
 
     // compute attracting forces
     val attrForces = highDimAffinities
-      .map(new RichMapFunction[(Long, Long, Double), (Long, Vector)] {
-      private var embedding: Map[Long, Vector] = null
-      private var lossAccumulator = new MapAccumulator()
-      private var accu = new DoubleCounter()
+      .map(new RichMapFunction[(Int, Int, Double), (Int, Vector[Double])] {
+      private var embedding: Map[Int, Vector[Double]] = null
+      private val lossAccumulator = new MapAccumulator()
       private var currentIteration = 0
       private var sumQ = 0.0
 
       override def open(parameters: Configuration) {
-        embedding = getRuntimeContext.getBroadcastVariable[LabeledVector]("embedding")
-          .asScala.map(x => x.label.toLong -> x.vector).toMap
+        embedding = getRuntimeContext.getBroadcastVariable[(Int, Vector[Double])]("embedding")
+          .asScala.map(x => x._1 -> x._2).toMap
         sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
         currentIteration = getIterationRuntimeContext.getSuperstepNumber
         getRuntimeContext.addAccumulator("loss", lossAccumulator)
       }
 
-      def map(pij: (Long, Long, Double)): (Long, Vector) = {
+      def map(pij: (Int, Int, Double)): (Int, Vector[Double]) = {
         val i = pij._1
         val j = pij._2
         val p = pij._3
 
-        val q = 1 / (1 + metric.distance(embedding(i), embedding(j)))
+        val q = 1 / (1 + metric(embedding(i), embedding(j)))
 
         if ((currentIteration + iterOffset) % 10 == 0) {
-          val partialLoss = p * log(p / (q / sumQ))
+          val partialLoss = p * scala.math.log(p / (q / sumQ))
           lossAccumulator.add((currentIteration + iterOffset, partialLoss))
         }
 
-        val partialGradient = (p * q * (embedding(i).asBreeze - embedding(j).asBreeze)).fromBreeze
+        val partialGradient = p * q * (embedding(i) - embedding(j))
 
         (i, partialGradient)
       }
     }).withBroadcastSet(embedding, "embedding")
       .withBroadcastSet(sumQ, "sumQ")
-      .groupBy(_._1).reduce((v1, v2) => (v1._1, (v1._2.asBreeze + v2._2.asBreeze).fromBreeze))
+      .groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2 + v2._2))
 
     // put everything together
     attrForces.join(repForcesAndSum).where(0).equalTo(0)
-      .map(new RichMapFunction[((Long, Vector), (Long, Vector, Double)), LabeledVector] {
+      .map(new RichMapFunction[((Int, Vector[Double]), (Int, Vector[Double], Double)), (Int, Vector[Double])] {
       private var sumQ: Double = 0.0
 
       override def open(parameters: Configuration) {
         sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
       }
 
-      def map(vectors: ((Long, Vector), (Long, Vector, Double))): LabeledVector = {
-        val attrForce = vectors._1._2.asBreeze
-        val repForce = vectors._2._2.asBreeze / sumQ
+      def map(vectors: ((Int, Vector[Double]), (Int, Vector[Double], Double))): (Int, Vector[Double]) = {
+        val attrForce = vectors._1._2
+        val repForce = vectors._2._2 / sumQ
 
-        LabeledVector(vectors._1._1, (attrForce - repForce).fromBreeze)
+        (vectors._1._1, attrForce - repForce)
       }
     }).withBroadcastSet(sumQ, "sumQ")
   }
 
-  def centerEmbedding(embedding: DataSet[(Double, Vector, Vector, Vector)]): DataSet[(Double, Vector, Vector, Vector)] = {
+  def centerEmbedding(embedding: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])]):
+  DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
     // center embedding
-    val sumAndCount = embedding.map(x => (x._2, 1)).reduce((x, y) => ((x._1.asBreeze + y._1.asBreeze).fromBreeze, x._2 + y._2))
+    val sumAndCount = embedding.map(x => (x._2, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
 
     embedding.mapWithBcVariable(sumAndCount) {
-      (v, sumAndCount) => (v._1, (v._2.asBreeze - (sumAndCount._1.asBreeze :/ sumAndCount._2.toDouble)).fromBreeze, v._3, v._4)
+      (v, sumAndCount) => (v._1, v._2 - (sumAndCount._1 :/ sumAndCount._2.toDouble), v._3, v._4)
     }
   }
 
-  def centerInput(embedding: DataSet[LabeledVector]): DataSet[LabeledVector] = {
+  def centerInput(embedding: DataSet[(Int, Vector[Double])]): DataSet[(Int, Vector[Double])] = {
     // center embedding
-    val sumAndCount = embedding.map(x => (x.vector.asBreeze, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
+    val sumAndCount = embedding.map(x => (x._2, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
 
 
     embedding.mapWithBcVariable(sumAndCount) {
-      (lv, sumAndCount) => LabeledVector(lv.label, (lv.vector.asBreeze - (sumAndCount._1 :/ sumAndCount._2.toDouble)).fromBreeze)
+      (lv, sumAndCount) => (lv._1, lv._2 - sumAndCount._1 :/ sumAndCount._2.toDouble)
     }
   }
   
-  def updateEmbedding(gradient: DataSet[LabeledVector], workingSet: DataSet[(Double, Vector, Vector, Vector)], minGain: Double, momentum: Double, learningRate: Double):
-  DataSet[(Double, Vector, Vector, Vector)] = {
-    gradient.map(t => (t.label, t.vector)).join(workingSet).where(0).equalTo(0) {
+  def updateEmbedding(gradient: DataSet[(Int, Vector[Double])],
+                      workingSet: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
+                      minGain: Double, momentum: Double, learningRate: Double):
+  DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
+
+    gradient.join(workingSet).where(0).equalTo(0) {
       (dY, rest) =>
         val currentEmbedding = rest._2
         val previousGradient = rest._3
@@ -393,41 +348,35 @@ object TsneHelpers {
         val currentGradient = dY._2
 
         val d = currentGradient.size
-        val newEmbedding = new Array[Double](d)
-        val newGain = new Array[Double](d)
-        val newGradient = new Array[Double](d)
+        val newEmbedding = new DenseVector[Double](d)
+        val newGain = new DenseVector[Double](d)
+        val newGradient = new DenseVector[Double](d)
 
         for (i <- 0 until d) {
           if ((currentGradient (i) > 0.0) == (previousGradient(i) > 0.0)) {
-            newGain(i) = Math.max(gain(i) * 0.8, minGain)
+            newGain(i) = scala.math.max(gain(i) * 0.8, minGain)
           } else {
-            newGain(i) = Math.max(gain(i) + 0.2, minGain)
+            newGain(i) = scala.math.max(gain(i) + 0.2, minGain)
           }
           newGradient(i) = momentum * previousGradient(i) - learningRate * newGain(i) * currentGradient(i)
           newEmbedding(i) = newGradient(i) + currentEmbedding(i)
         }
-        (dY._1, DenseVector(newEmbedding), DenseVector(newGradient), DenseVector(newGain))
+        (dY._1, newEmbedding, newGradient, newGain)
     }
   }
   
-  def iterationComputation (iterations: Int, momentum: Double, workingSet: DataSet[(Double, Vector, Vector, Vector)],
-                            highdimAffinites: DataSet[(Long, Long, Double)], metric: DistanceMetric,
+  def iterationComputation (iterations: Int, momentum: Double,
+                            workingSet:DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
+                            highdimAffinites: DataSet[(Int, Int, Double)], metric: (Vector[Double], Vector[Double]) => Double,
                             learningRate: Double, theta: Double, iterOffset: Int=0) = {
+
     workingSet.iterate(iterations) {
-      // (label, embedding, gradient, gains)
+      // (index, embedding, gradient, gains)
       workingSet =>
 
-      val currentEmbedding = workingSet.map(t => LabeledVector(t._1, t._2))
-      // compute pairwise differences yi - yj
-      val distances = computeDistances(currentEmbedding, metric)
-      // Compute Q-matrix and normalization sum
-      //val results = computeLowDimAffinities(distances)
+      val currentEmbedding = workingSet.map(t => (t._1, t._2))
 
-      //val lowDimAffinities = results.q
-      //val sumAffinities = results.sumQ
-      val sumAffinities = sumLowDimAffinities(currentEmbedding, metric)
-
-      val dY = gradient(highdimAffinites, currentEmbedding, metric, sumAffinities, theta, iterOffset)
+      val dY = gradient(highdimAffinites, currentEmbedding, metric, theta, iterOffset)
 
       val minGain = 0.01
 
@@ -439,16 +388,17 @@ object TsneHelpers {
     }
   }
 
-  def optimize(highDimAffinities: DataSet[(Long, Long, Double)], initialWorkingSet: DataSet[(Double, Vector, Vector, Vector)],
-               learningRate: Double, iterations: Int, metric: DistanceMetric,
+  def optimize(highDimAffinities: DataSet[(Int, Int, Double)],
+               initialWorkingSet: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
+               learningRate: Double, iterations: Int, metric: (Vector[Double], Vector[Double]) => Double,
                earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double, theta: Double):
-  DataSet[LabeledVector] = {
+  DataSet[(Int, Vector[Double])] = {
 
-    val iterInitMomentumExaggeration = min(iterations, 20)
-    val iterExaggeration = min(iterations - iterInitMomentumExaggeration, 101-20)
+    val iterInitMomentumExaggeration = scala.math.min(iterations, 20)
+    val iterExaggeration = scala.math.min(iterations - iterInitMomentumExaggeration, 101-20)
     val iterWoExaggeration = iterations - iterExaggeration - iterInitMomentumExaggeration
 
-    var embedding: DataSet[(Double, Vector, Vector, Vector)] = null
+    var embedding: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = null
 
     // early exaggeration
     val exaggeratedAffinities = highDimAffinities.map(x => (x._1, x._2, x._3 * earlyExaggeration))
@@ -469,23 +419,23 @@ object TsneHelpers {
         metric, learningRate, theta, iterExaggeration + iterInitMomentumExaggeration)
     }
 
-    embedding.map(x => LabeledVector(x._1, x._2))
+    embedding.map(x => (x._1, x._2))
   }
 
   //============================= binary search ===============================================//
 
-  private def binarySearch(distances: Seq[(Long, Long, Double)], perplexity: Double):
-  Seq[(Long, Long, Double)] = {
+  private def binarySearch(distances: Seq[(Int, Int, Double)], perplexity: Double):
+  Seq[(Int, Int, Double)] = {
     // try to approximate beta_i (1/sigma_i**2) so we can compute p_j|i
     // set target to log(perplexity) (entropy) to make computation simpler
     approximateBeta(1.0,
-      distances, log(perplexity), Double.NegativeInfinity, Double.NegativeInfinity, Double.PositiveInfinity)
+      distances, scala.math.log(perplexity), Double.NegativeInfinity, Double.NegativeInfinity, Double.PositiveInfinity)
   }
 
-  private def approximateBeta(beta: Double, distances: Seq[(Long, Long, Double)], targetH: Double,
+  private def approximateBeta(beta: Double, distances: Seq[(Int, Int, Double)], targetH: Double,
                               previousH: Double, min: Double,
                               max: Double, iterations: Int = 50):
-  Seq[(Long, Long, Double)] = {
+  Seq[(Int, Int, Double)] = {
     // compute the entropy
     val h = computeH(distances, beta)
 
@@ -526,20 +476,20 @@ object TsneHelpers {
   }
 
   private def isCloseEnough(a: Double, b: Double, tol: Double = 1e-5): Boolean = {
-    abs(a - b) < tol
+    scala.math.abs(a - b) < tol
   }
 
-  private def computeH(distances: Seq[(Long, Long, Double)], beta: Double = 1.0): Double = {
+  private def computeH(distances: Seq[(Int, Int, Double)], beta: Double = 1.0): Double = {
     //                          d_i      exp(-d_i * beta)
-    val p = distances.map(d => (d._3, exp(-d._3 * beta)))
+    val p = distances.map(d => (d._3, scala.math.exp(-d._3 * beta)))
     val sumP = if (p.map(_._2).sum == 0.0) 1e-7 else p.map(_._2).sum
-    log(sumP) + beta * p.map(p => p._1 * p._2).sum / sumP
+    scala.math.log(sumP) + beta * p.map(p => p._1 * p._2).sum / sumP
   }
 
-  private def computeP(distances: Seq[(Long, Long, Double)], beta: Double):
-  Seq[(Long, Long, Double)] = {
+  private def computeP(distances: Seq[(Int, Int, Double)], beta: Double):
+  Seq[(Int, Int, Double)] = {
     //                            i     j      exp(-d_i * beta)
-    val p = distances.map(d => (d._1, d._2, exp(-d._3 * beta)))
+    val p = distances.map(d => (d._1, d._2, scala.math.exp(-d._3 * beta)))
     val sumP = if (p.map(_._3).sum == 0.0) 1e-7 else p.map(_._3).sum
     //            i     j      p_i|j
     p.map(p => (p._1, p._2, p._3 / sumP))

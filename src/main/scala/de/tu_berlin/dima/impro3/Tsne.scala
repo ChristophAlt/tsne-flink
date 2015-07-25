@@ -18,14 +18,12 @@
 
 package de.tu_berlin.dima.impro3
 
+import breeze.linalg._
+import breeze.linalg.functions._
 import de.tu_berlin.dima.impro3.TsneHelpers._
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
 import org.apache.flink.core.fs.FileSystem.WriteMode
-import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math.SparseVector
-import org.apache.flink.ml.metrics.distances._
-
 
 object Tsne {
 
@@ -62,7 +60,7 @@ object Tsne {
     val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
       randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta, knnMethod, knnIterations, knnBlocks)
 
-    result.map(x=> (x.label.toLong, x.vector(0), x.vector(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
+    result.map(x=> (x._1, x._2(0), x._2(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
     val executionResult = env.execute("TSNE")
 
@@ -72,32 +70,38 @@ object Tsne {
     pw.close
   }
 
-  private def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
-                        fields: Array[Int]): DataSet[LabeledVector] = {
+  def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
+                        fields: Array[Int]): DataSet[(Int, Vector[Double])] = {
+
     env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
-      .groupBy(_._1).reduceGroup(
-        elements => {
-          val elementsIterable = elements.toIterable
-          val entries = elementsIterable.map(x => (x._2, x._3))
-          LabeledVector(elementsIterable.head._1.toDouble, SparseVector.fromCOO(dimension, entries))
-    })
+    .groupBy(_._1).reduceGroup {
+      vectorEntries =>
+          val vectorBuilder = new VectorBuilder[Double](dimension)
+          val first = vectorEntries.next()
+          vectorBuilder.add(first._2, first._3)
+            while (vectorEntries.hasNext) {
+              val vectorEntry = vectorEntries.next()
+              vectorBuilder.add(vectorEntry._2, vectorEntry._3)
+            }
+          (first._1, vectorBuilder.toDenseVector)
+        }
   }
 
-  private def getMetric(metric: String): DistanceMetric = {
+  def getMetric(metric: String): (Vector[Double], Vector[Double]) => Double = {
     metric match {
-      case "sqeucledian" => SquaredEuclideanDistanceMetric()
-      case "eucledian" => EuclideanDistanceMetric()
-      case "cosine" => CosineDistanceMetric()
+      case "sqeucledian" => squaredDistance.apply[Vector[Double], Vector[Double], Double]
+      case "eucledian" => euclideanDistance.apply[Vector[Double], Vector[Double], Double]
+      case "cosine" => cosineDistance.apply[Vector[Double], Vector[Double], Double]
       case _ => throw new IllegalArgumentException(s"Metric '$metric' not defined")
     }
   }
 
-  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[LabeledVector], metric: DistanceMetric,
+  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[(Int, Vector[Double])], metric: (Vector[Double], Vector[Double]) => Double,
                                perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
                                iterations: Int, randomState: Int, neighbors: Int,
                                earlyExaggeration: Double, initialMomentum: Double,
                                finalMomentum: Double, theta: Double, knnMethod: String, knnIterations: Int, knnBlocks: Int):
-  DataSet[LabeledVector] = {
+  DataSet[(Int, Vector[Double])] = {
 
     //val centeredInput = centerInput(input)
     //val knn = kNearestNeighbors(centeredInput, neighbors, metric)

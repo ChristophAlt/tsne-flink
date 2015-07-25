@@ -18,12 +18,9 @@
 
 package de.tu_berlin.dima.impro3
 
+import breeze.linalg._
 import de.tu_berlin.dima.impro3.TsneHelpers._
 import org.apache.flink.api.scala._
-import org.apache.flink.ml.common.LabeledVector
-import org.apache.flink.ml.math.Breeze._
-import org.apache.flink.ml.math.{DenseVector, SparseVector}
-import org.apache.flink.ml.metrics.distances.SquaredEuclideanDistanceMetric
 import org.scalatest._
 
 
@@ -33,7 +30,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val neighbors = 2
-    val metric = SquaredEuclideanDistanceMetric()
+    val metric = Tsne.getMetric("sqeucledian")
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
 
@@ -48,7 +45,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val neighbors = 2
-    val metric = SquaredEuclideanDistanceMetric()
+    val metric = Tsne.getMetric("sqeucledian")
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
 
@@ -81,9 +78,9 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val perplexity = 2.0
     val neighbors = 10
-    val metric = SquaredEuclideanDistanceMetric()
+    val metric = Tsne.getMetric("sqeucledian")
 
-    val input = TsneHelpersTestSuite
+    val input = Tsne
       .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
 
     val knn = kNearestNeighbors(input, neighbors, metric)
@@ -94,7 +91,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+        case Some(res) => res._3 should equal (expected._3 +- 1e-12)
         case None => fail("expected result not found")
       }
     }
@@ -111,7 +108,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-12)
+        case Some(res) => res._3 should equal (expected._3 +- 1e-12)
         case _ => fail("expected result not found")
       }
     }
@@ -129,18 +126,18 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     for (expected <- expectedResults) {
       val result = results.find(x => x._1 == expected._1 && x._2 == expected._2)
       result match {
-        case Some(result) => result._3 should equal (expected._3 +- 1e-6)
+        case Some(res) => res._3 should equal (expected._3 +- 1e-6)
         case _ => fail("expected result not found")
       }
     }
     results.map(_._3).sum should equal (1.0 +- 1e-12)
   }
 
-  "SquaredEuclideanDistance" should "return the squared euclidean distance for all the datapoints" in {
+  /*"SquaredEuclideanDistance" should "return the squared euclidean distance for all the datapoints" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val y = env.fromCollection(TsneHelpersTestSuite.yInit)
-    val results = computeDistances(y, new SquaredEuclideanDistanceMetric).map(t => (t._1, t._2, t._3)).collect()
+    val results = computeDistances(y, Tsne.getMetric("sqeucledian")).map(t => (t._1, t._2, t._3)).collect()
     val expectedResults = TsneHelpersTestSuite.distancesDenseWithoutVectorDiff
     
     print(results)
@@ -153,20 +150,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
         case _ => fail("expected result not found")
       }
     }
-  }
-
-  "sumLowDimAffinities" should "return the sum over Q" in {
-    val env = ExecutionEnvironment.getExecutionEnvironment
-
-    val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
-
-    val results = sumLowDimAffinities(embedding, SquaredEuclideanDistanceMetric()).collect()
-
-    val expectedResult = TsneHelpersTestSuite.denseSumQ
-
-    results.size should equal (1)
-    results(0) should equal (expectedResult +- 1e-12)
-  }
+  }*/
 
   "centerEmbedding" should "compute the centered embedding as LabeledVectors" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
@@ -175,23 +159,23 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val embeddingSeq = TsneHelpersTestSuite.centeringInput.map( g => {
 
-      val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
-      val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
+      val lastGradient = DenseVector.fill(nComponents, 0.0)
+      val gains = DenseVector.fill(nComponents, 1.0)
 
-      (g.label, g.vector, lastGradient.fromBreeze, gains.fromBreeze)
+      (g._1, g._2, lastGradient.toVector, gains.toVector)
     })
 
     val embedding = env.fromCollection(embeddingSeq)
 
-    val results = centerEmbedding(embedding).map(x => LabeledVector(x._1, x._2)).collect()
+    val results = centerEmbedding(embedding).map(x => (x._1, x._2)).collect()
 
     val expectedResults = TsneHelpersTestSuite.centeringResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
-      val result = results.find(x => x.label == expected.label)
+      val result = results.find(x => x._1 == expected._1)
       result match {
-        case Some(result) => result.vector should equal (expected.vector)
+        case Some(res) => res._2 should equal (expected._2)
         case _ => fail("expected result not found")
       }
     }
@@ -202,13 +186,12 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val jointDistribution = env.fromCollection(TsneHelpersTestSuite.denseJointProbabilitiesResults)
     val embedding = env.fromCollection(TsneHelpersTestSuite.initialEmbedding)
-    val sumQ = env.fromCollection(List(TsneHelpersTestSuite.denseSumQ))
     // the result of setting theta to zero is the same as not using a quad-tree at all
     val theta = 0.0
 
     val grad = embedding.iterate(1) {
       currentEmbedding =>
-        gradient(jointDistribution, currentEmbedding, SquaredEuclideanDistanceMetric(), sumQ, theta)
+        gradient(jointDistribution, currentEmbedding, Tsne.getMetric("sqeucledian"), theta)
     }
 
     val results = grad.collect()
@@ -217,13 +200,12 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
-      val result = results.find(x => x.label == expected.label)
+      val result = results.find(x => x._1 == expected._1)
       result match {
-        case Some(result) => {
-          for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-12)
+        case Some(res) =>
+          for (i <- 0 until res._2.size){
+            res._2(i) should equal (expected._2(i) +- 1e-12)
           }
-        }
         case _ => fail("expected result not found")
       }
     }
@@ -235,10 +217,10 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val randomState = 0
     val nComponents = 2
 
-    val zeroVector = breeze.linalg.DenseVector.fill(nComponents, 0.0).fromBreeze
-    val oneVector = breeze.linalg.DenseVector.fill(nComponents, 1.0).fromBreeze
+    val zeroVector = DenseVector.fill(nComponents, 0.0)
+    val oneVector = DenseVector.fill(nComponents, 1.0)
 
-    val input = TsneHelpersTestSuite
+    val input = Tsne
       .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
 
     val results = initWorkingSet(input, nComponents, randomState).collect()
@@ -266,25 +248,24 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
       val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
       val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
 
-      (g.label, g.vector, lastGradient.fromBreeze, gains.fromBreeze)
+      (g._1, g._2, lastGradient.toVector, gains.toVector)
     })
 
     val workingSet = env.fromCollection(workingSetSeq)
 
     val results = updateEmbedding(gradient, workingSet, minGain, momentum, learningRate)
-      .map(x => LabeledVector(x._1, x._2)).collect()
+      .map(x => (x._1, x._2)).collect()
 
     val expectedResults = TsneHelpersTestSuite.updatedEmbeddingResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
-      val result = results.find(x => x.label == expected.label)
+      val result = results.find(x => x._1 == expected._1)
       result match {
-        case Some(result) => {
-          for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-9)
+        case Some(res) =>
+          for (i <- 0 until res._2.size){
+            res._2(i) should equal (expected._2(i) +- 1e-9)
           }
-        }
         case _ => fail("expected result not found")
       }
     }
@@ -297,7 +278,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val learningRate = 300
     val nComponents = 2
     val iterations = 1
-    val metric = SquaredEuclideanDistanceMetric()
+    val metric = Tsne.getMetric("sqeucledian")
     // the result of setting theta to zero is the same as not using a quad-tree at all
     val theta = 0.0
 
@@ -310,25 +291,24 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
       val lastGradient = breeze.linalg.DenseVector.fill(nComponents, 0.0)
       val gains = breeze.linalg.DenseVector.fill(nComponents, 1.0)
 
-      (g.label, g.vector, lastGradient.fromBreeze, gains.fromBreeze)
+      (g._1, g._2, lastGradient.toVector, gains.toVector)
     })
 
     val workingSet = env.fromCollection(workingSetSeq)
 
     val results = iterationComputation(iterations, momentum, workingSet, jointDistribution, metric, learningRate, theta)
-      .map(x => LabeledVector(x._1, x._2)).collect()
+      .map(x => (x._1, x._2)).collect()
 
     val expectedResults = TsneHelpersTestSuite.updatedAndCentredEmbeddingResults
 
     results.size should equal (expectedResults.size)
     for (expected <- expectedResults) {
-      val result = results.find(x => x.label == expected.label)
+      val result = results.find(x => x._1 == expected._1)
       result match {
-        case Some(result) => {
-          for (i <- 0 until result.vector.size){
-            result.vector(i) should equal (expected.vector(i) +- 1e-9)
+        case Some(res) =>
+          for (i <- 0 until res._2.size){
+            res._2(i) should equal (expected._2(i) +- 1e-9)
           }
-        }
         case _ => fail("expected result not found")
       }
     }
@@ -336,312 +316,150 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 }
 
 object TsneHelpersTestSuite {
-  val knnInput: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(4, List((0, 0.0),(1, 0.0),(2, 0.0),(3, 0.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(4, List((0, 1.0),(1, 1.0),(2, 1.0),(3, 1.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(4, List((0, 2.0),(1, 2.0),(2, 2.0),(3, 2.0)))),
-    LabeledVector(3.0, SparseVector.fromCOO(4, List((0, 3.0),(1, 3.0),(2, 3.0),(3, 3.0)))),
-    LabeledVector(4.0, SparseVector.fromCOO(4, List((0, 4.0),(1, 4.0),(2, 4.0),(3, 4.0)))),
-    LabeledVector(5.0, SparseVector.fromCOO(4, List((0, 5.0),(1, 5.0),(2, 5.0),(3, 5.0)))),
-    LabeledVector(6.0, SparseVector.fromCOO(4, List((0, 6.0),(1, 6.0),(2, 6.0),(3, 6.0)))),
-    LabeledVector(7.0, SparseVector.fromCOO(4, List((0, 7.0),(1, 7.0),(2, 7.0),(3, 7.0)))),
-    LabeledVector(8.0, SparseVector.fromCOO(4, List((0, 8.0),(1, 8.0),(2, 8.0),(3, 8.0))))
+  val knnInput: Seq[(Int, Vector[Double])] = List(
+    (0, SparseVector(4)(0 -> 0.0, 1 -> 0.0, 2 -> 0.0, 3 -> 0.0)),
+    (1, SparseVector(4)(0 -> 1.0, 1 -> 1.0, 2 -> 1.0, 3 -> 1.0)),
+    (2, SparseVector(4)(0 -> 2.0, 1 -> 2.0, 2 -> 2.0, 3 -> 2.0)),
+    (3, SparseVector(4)(0 -> 3.0, 1 -> 3.0, 2 -> 3.0, 3 -> 3.0)),
+    (4, SparseVector(4)(0 -> 4.0, 1 -> 4.0, 2 -> 4.0, 3 -> 4.0)),
+    (5, SparseVector(4)(0 -> 5.0, 1 -> 5.0, 2 -> 5.0, 3 -> 5.0)),
+    (6, SparseVector(4)(0 -> 6.0, 1 -> 6.0, 2 -> 6.0, 3 -> 6.0)),
+    (7, SparseVector(4)(0 -> 7.0, 1 -> 7.0, 2 -> 7.0, 3 -> 7.0)),
+    (8, SparseVector(4)(0 -> 8.0, 1 -> 8.0, 2 -> 8.0, 3 -> 8.0))
   ).toSeq
 
   // result for k = 2
-  val knnResults: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 4.0), (0L, 2L, 16.0), (1L, 2L, 4.0), (1L, 0L, 4.0), (2L, 3L, 4.0), (2L, 1L, 4.0),
-    (3L, 4L, 4.0), (3L, 2L, 4.0), (4L, 5L, 4.0), (4L, 3L, 4.0), (5L, 6L, 4.0), (5L, 4L, 4.0),
-    (6L, 7L, 4.0), (6L, 5L, 4.0), (7L, 8L, 4.0), (7L, 6L, 4.0), (8L, 7L, 4.0), (8L, 6L, 16.0)
+  val knnResults: Seq[(Int, Int, Double)] = List(
+    (0, 1, 4.0), (0, 2, 16.0), (1, 2, 4.0), (1, 0, 4.0), (2, 3, 4.0), (2, 1, 4.0),
+    (3, 4, 4.0), (3, 2, 4.0), (4, 5, 4.0), (4, 3, 4.0), (5, 6, 4.0), (5, 4, 4.0),
+    (6, 7, 4.0), (6, 5, 4.0), (7, 8, 4.0), (7, 6, 4.0), (8, 7, 4.0), (8, 6, 16.0)
   ).toSeq
 
   // Python implementation van der Maaten, perplexity: 2.0, nComponents: 2, earlyExaggeration:
 
-  val densePairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 2.370974987703e-02), (0L, 2L, 5.153826240184e-05), (0L, 3L, 1.945495759780e-02), (0L, 4L, 8.216433537309e-04), (0L, 5L, 4.872518553230e-03), (0L, 6L, 7.036533081247e-02), (0L, 7L, 8.338103510412e-01), (0L, 8L, 4.291578136374e-02), (0L, 9L, 3.998129138403e-03), (1L, 0L, 7.724806516559e-01), (1L, 2L, 1.365877675224e-09), (1L, 3L, 3.248251955497e-05), (1L, 4L, 5.336682282239e-04), (1L, 5L, 1.440504524837e-01), (1L, 6L, 1.402694896096e-05), (1L, 7L, 8.229819286616e-02), (1L, 8L, 5.685570334838e-05), (1L, 9L, 5.336682282239e-04), (2L, 0L, 1.898500331402e-03), (2L, 1L, 8.687658519724e-04), (2L, 3L, 5.062254851994e-02), (2L, 4L, 1.449209955883e-02), (2L, 5L, 3.548272991202e-03), (2L, 6L, 2.928791467503e-02), (2L, 7L, 3.166935688445e-02), (2L, 8L, 2.316520085169e-02), (2L, 9L, 8.444473403355e-01), (3L, 0L, 2.390453996554e-04), (3L, 1L, 1.395251795149e-08), (3L, 2L, 1.371014800172e-06), (3L, 4L, 2.369600685486e-03), (3L, 5L, 1.347198827355e-04), (3L, 6L, 3.128918783462e-02), (3L, 7L, 2.411490824021e-05), (3L, 8L, 7.330981240389e-01), (3L, 9L, 2.328438222830e-01), (4L, 0L, 1.019336232626e-04), (4L, 1L, 2.549661856719e-04), (4L, 2L, 8.105432254715e-05), (4L, 3L, 9.980288326134e-03), (4L, 5L, 5.017868132870e-03), (4L, 6L, 1.751495817431e-01), (4L, 7L, 1.008626268887e-03), (4L, 8L, 7.770114760492e-01), (4L, 9L, 3.139420534839e-02), (5L, 0L, 9.336380191993e-06), (5L, 1L, 1.005438326603e-03), (5L, 2L, 1.769727010776e-13), (5L, 3L, 2.563249124685e-03), (5L, 4L, 1.665948534565e-02), (5L, 6L, 1.977751128205e-10), (5L, 7L, 2.760372711471e-01), (5L, 8L, 1.333923297742e-08), (5L, 9L, 7.037252061386e-01), (6L, 0L, 2.657830365339e-02), (6L, 1L, 4.705122579295e-03), (6L, 2L, 7.129194416069e-03), (6L, 3L, 3.052697452006e-02), (6L, 4L, 5.312632631673e-02), (6L, 5L, 4.705122579295e-03), (6L, 7L, 8.775567604535e-03), (6L, 8L, 8.480859960929e-01), (6L, 9L, 1.636739223770e-02), (7L, 0L, 8.439216060511e-01), (7L, 1L, 2.173031429002e-02), (7L, 2L, 4.863220572021e-03), (7L, 3L, 1.840043131472e-02), (7L, 4L, 1.319325614475e-02), (7L, 5L, 6.961968258558e-02), (7L, 6L, 7.370873853279e-03), (7L, 8L, 2.500183873820e-03), (7L, 9L, 1.840043131472e-02), (8L, 0L, 1.718948684906e-02), (8L, 1L, 3.907353474692e-03), (8L, 2L, 4.531278151932e-03), (8L, 3L, 3.605396373725e-02), (8L, 4L, 7.022214844512e-02), (8L, 5L, 4.531278151932e-03), (8L, 6L, 8.397228403177e-01), (8L, 7L, 3.907353474692e-03), (8L, 9L, 1.993429739760e-02), (9L, 0L, 4.341453089465e-07), (9L, 1L, 2.423850003604e-08), (9L, 2L, 9.192527632300e-02), (9L, 3L, 8.003537295921e-01), (9L, 4L, 9.192527632300e-02), (9L, 5L, 5.132223630089e-03), (9L, 6L, 9.710748028923e-05), (9L, 7L, 7.776147410114e-06), (9L, 8L, 1.055815212027e-02)
+  val densePairwiseAffinitiesResults: Seq[(Int, Int, Double)] = List(
+    (0, 1, 2.370974987703e-02), (0, 2, 5.153826240184e-05), (0, 3, 1.945495759780e-02), (0, 4, 8.216433537309e-04), (0, 5, 4.872518553230e-03), (0, 6, 7.036533081247e-02), (0, 7, 8.338103510412e-01), (0, 8, 4.291578136374e-02), (0, 9, 3.998129138403e-03), (1, 0, 7.724806516559e-01), (1, 2, 1.365877675224e-09), (1, 3, 3.248251955497e-05), (1, 4, 5.336682282239e-04), (1, 5, 1.440504524837e-01), (1, 6, 1.402694896096e-05), (1, 7, 8.229819286616e-02), (1, 8, 5.685570334838e-05), (1, 9, 5.336682282239e-04), (2, 0, 1.898500331402e-03), (2, 1, 8.687658519724e-04), (2, 3, 5.062254851994e-02), (2, 4, 1.449209955883e-02), (2, 5, 3.548272991202e-03), (2, 6, 2.928791467503e-02), (2, 7, 3.166935688445e-02), (2, 8, 2.316520085169e-02), (2, 9, 8.444473403355e-01), (3, 0, 2.390453996554e-04), (3, 1, 1.395251795149e-08), (3, 2, 1.371014800172e-06), (3, 4, 2.369600685486e-03), (3, 5, 1.347198827355e-04), (3, 6, 3.128918783462e-02), (3, 7, 2.411490824021e-05), (3, 8, 7.330981240389e-01), (3, 9, 2.328438222830e-01), (4, 0, 1.019336232626e-04), (4, 1, 2.549661856719e-04), (4, 2, 8.105432254715e-05), (4, 3, 9.980288326134e-03), (4, 5, 5.017868132870e-03), (4, 6, 1.751495817431e-01), (4, 7, 1.008626268887e-03), (4, 8, 7.770114760492e-01), (4, 9, 3.139420534839e-02), (5, 0, 9.336380191993e-06), (5, 1, 1.005438326603e-03), (5, 2, 1.769727010776e-13), (5, 3, 2.563249124685e-03), (5, 4, 1.665948534565e-02), (5, 6, 1.977751128205e-10), (5, 7, 2.760372711471e-01), (5, 8, 1.333923297742e-08), (5, 9, 7.037252061386e-01), (6, 0, 2.657830365339e-02), (6, 1, 4.705122579295e-03), (6, 2, 7.129194416069e-03), (6, 3, 3.052697452006e-02), (6, 4, 5.312632631673e-02), (6, 5, 4.705122579295e-03), (6, 7, 8.775567604535e-03), (6, 8, 8.480859960929e-01), (6, 9, 1.636739223770e-02), (7, 0, 8.439216060511e-01), (7, 1, 2.173031429002e-02), (7, 2, 4.863220572021e-03), (7, 3, 1.840043131472e-02), (7, 4, 1.319325614475e-02), (7, 5, 6.961968258558e-02), (7, 6, 7.370873853279e-03), (7, 8, 2.500183873820e-03), (7, 9, 1.840043131472e-02), (8, 0, 1.718948684906e-02), (8, 1, 3.907353474692e-03), (8, 2, 4.531278151932e-03), (8, 3, 3.605396373725e-02), (8, 4, 7.022214844512e-02), (8, 5, 4.531278151932e-03), (8, 6, 8.397228403177e-01), (8, 7, 3.907353474692e-03), (8, 9, 1.993429739760e-02), (9, 0, 4.341453089465e-07), (9, 1, 2.423850003604e-08), (9, 2, 9.192527632300e-02), (9, 3, 8.003537295921e-01), (9, 4, 9.192527632300e-02), (9, 5, 5.132223630089e-03), (9, 6, 9.710748028923e-05), (9, 7, 7.776147410114e-06), (9, 8, 1.055815212027e-02)
   ).toSeq
 
-  val denseJointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 3.980952007665e-02), (0L, 2L, 9.750192969019e-05), (0L, 3L, 9.847001498727e-04), (0L, 4L, 4.617884884968e-05), (0L, 5L, 2.440927466711e-04), (0L, 6L, 4.847181723293e-03), (0L, 7L, 8.388659785461e-02), (0L, 8L, 3.005263410640e-03), (0L, 9L, 1.999281641856e-04), (1L, 0L, 3.980952007665e-02), (1L, 2L, 4.343836089250e-05), (1L, 3L, 1.624823603646e-06), (1L, 4L, 3.943172069479e-05), (1L, 5L, 7.252794540517e-03), (1L, 6L, 2.359574764128e-04), (1L, 7L, 5.201425357809e-03), (1L, 8L, 1.982104589020e-04), (1L, 9L, 2.668462333619e-05), (2L, 0L, 9.750192969019e-05), (2L, 1L, 4.343836089250e-05), (2L, 3L, 2.531195976737e-03), (2L, 4L, 7.286576940686e-04), (2L, 5L, 1.774136495689e-04), (2L, 6L, 1.820855454555e-03), (2L, 7L, 1.826628872824e-03), (2L, 8L, 1.384823950181e-03), (2L, 9L, 4.681863083292e-02), (3L, 0L, 9.847001498727e-04), (3L, 1L, 1.624823603646e-06), (3L, 2L, 2.531195976737e-03), (3L, 4L, 6.174944505810e-04), (3L, 5L, 1.348984503710e-04), (3L, 6L, 3.090808117734e-03), (3L, 7L, 9.212273111480e-04), (3L, 8L, 3.845760438881e-02), (3L, 9L, 5.165987759376e-02), (4L, 0L, 4.617884884968e-05), (4L, 1L, 3.943172069479e-05), (4L, 2L, 7.286576940686e-04), (4L, 3L, 6.174944505810e-04), (4L, 5L, 1.083867673926e-03), (4L, 6L, 1.141379540299e-02), (4L, 7L, 7.100941206818e-04), (4L, 8L, 4.236168122471e-02), (4L, 9L, 6.165974083570e-03), (5L, 0L, 2.440927466711e-04), (5L, 1L, 7.252794540517e-03), (5L, 2L, 1.774136495689e-04), (5L, 3L, 1.348984503710e-04), (5L, 4L, 1.083867673926e-03), (5L, 6L, 2.352561388535e-04), (5L, 7L, 1.728284768663e-02), (5L, 8L, 2.265645745583e-04), (5L, 9L, 3.544287148844e-02), (6L, 0L, 4.847181723293e-03), (6L, 1L, 2.359574764128e-04), (6L, 2L, 1.820855454555e-03), (6L, 3L, 3.090808117734e-03), (6L, 4L, 1.141379540299e-02), (6L, 5L, 2.352561388535e-04), (6L, 7L, 8.073220728907e-04), (6L, 8L, 8.439044182053e-02), (6L, 9L, 8.232249858994e-04), (7L, 0L, 8.388659785461e-02), (7L, 1L, 5.201425357809e-03), (7L, 2L, 1.826628872824e-03), (7L, 3L, 9.212273111480e-04), (7L, 4L, 7.100941206818e-04), (7L, 5L, 1.728284768663e-02), (7L, 6L, 8.073220728907e-04), (7L, 8L, 3.203768674256e-04), (7L, 9L, 9.204103731065e-04), (8L, 0L, 3.005263410640e-03), (8L, 1L, 1.982104589020e-04), (8L, 2L, 1.384823950181e-03), (8L, 3L, 3.845760438881e-02), (8L, 4L, 4.236168122471e-02), (8L, 5L, 2.265645745583e-04), (8L, 6L, 8.439044182053e-02), (8L, 7L, 3.203768674256e-04), (8L, 9L, 1.524622475894e-03), (9L, 0L, 1.999281641856e-04), (9L, 1L, 2.668462333619e-05), (9L, 2L, 4.681863083292e-02), (9L, 3L, 5.165987759376e-02), (9L, 4L, 6.165974083570e-03), (9L, 5L, 3.544287148844e-02), (9L, 6L, 8.232249858994e-04), (9L, 7L, 9.204103731065e-04), (9L, 8L, 1.524622475894e-03)
+  val denseJointProbabilitiesResults: Seq[(Int, Int, Double)] = List(
+    (0, 1, 3.980952007665e-02), (0, 2, 9.750192969019e-05), (0, 3, 9.847001498727e-04), (0, 4, 4.617884884968e-05), (0, 5, 2.440927466711e-04), (0, 6, 4.847181723293e-03), (0, 7, 8.388659785461e-02), (0, 8, 3.005263410640e-03), (0, 9, 1.999281641856e-04), (1, 0, 3.980952007665e-02), (1, 2, 4.343836089250e-05), (1, 3, 1.624823603646e-06), (1, 4, 3.943172069479e-05), (1, 5, 7.252794540517e-03), (1, 6, 2.359574764128e-04), (1, 7, 5.201425357809e-03), (1, 8, 1.982104589020e-04), (1, 9, 2.668462333619e-05), (2, 0, 9.750192969019e-05), (2, 1, 4.343836089250e-05), (2, 3, 2.531195976737e-03), (2, 4, 7.286576940686e-04), (2, 5, 1.774136495689e-04), (2, 6, 1.820855454555e-03), (2, 7, 1.826628872824e-03), (2, 8, 1.384823950181e-03), (2, 9, 4.681863083292e-02), (3, 0, 9.847001498727e-04), (3, 1, 1.624823603646e-06), (3, 2, 2.531195976737e-03), (3, 4, 6.174944505810e-04), (3, 5, 1.348984503710e-04), (3, 6, 3.090808117734e-03), (3, 7, 9.212273111480e-04), (3, 8, 3.845760438881e-02), (3, 9, 5.165987759376e-02), (4, 0, 4.617884884968e-05), (4, 1, 3.943172069479e-05), (4, 2, 7.286576940686e-04), (4, 3, 6.174944505810e-04), (4, 5, 1.083867673926e-03), (4, 6, 1.141379540299e-02), (4, 7, 7.100941206818e-04), (4, 8, 4.236168122471e-02), (4, 9, 6.165974083570e-03), (5, 0, 2.440927466711e-04), (5, 1, 7.252794540517e-03), (5, 2, 1.774136495689e-04), (5, 3, 1.348984503710e-04), (5, 4, 1.083867673926e-03), (5, 6, 2.352561388535e-04), (5, 7, 1.728284768663e-02), (5, 8, 2.265645745583e-04), (5, 9, 3.544287148844e-02), (6, 0, 4.847181723293e-03), (6, 1, 2.359574764128e-04), (6, 2, 1.820855454555e-03), (6, 3, 3.090808117734e-03), (6, 4, 1.141379540299e-02), (6, 5, 2.352561388535e-04), (6, 7, 8.073220728907e-04), (6, 8, 8.439044182053e-02), (6, 9, 8.232249858994e-04), (7, 0, 8.388659785461e-02), (7, 1, 5.201425357809e-03), (7, 2, 1.826628872824e-03), (7, 3, 9.212273111480e-04), (7, 4, 7.100941206818e-04), (7, 5, 1.728284768663e-02), (7, 6, 8.073220728907e-04), (7, 8, 3.203768674256e-04), (7, 9, 9.204103731065e-04), (8, 0, 3.005263410640e-03), (8, 1, 1.982104589020e-04), (8, 2, 1.384823950181e-03), (8, 3, 3.845760438881e-02), (8, 4, 4.236168122471e-02), (8, 5, 2.265645745583e-04), (8, 6, 8.439044182053e-02), (8, 7, 3.203768674256e-04), (8, 9, 1.524622475894e-03), (9, 0, 1.999281641856e-04), (9, 1, 2.668462333619e-05), (9, 2, 4.681863083292e-02), (9, 3, 5.165987759376e-02), (9, 4, 6.165974083570e-03), (9, 5, 3.544287148844e-02), (9, 6, 8.232249858994e-04), (9, 7, 9.204103731065e-04), (9, 8, 1.524622475894e-03)
   ).toSeq
 
   val denseSumQ = 3.365625463923e+01
 
-  val denseUnnormLowDimAffinitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 1.997990966178e-01), (0L, 2L, 3.438741251510e-01), (0L, 3L, 5.084645547121e-01), (0L, 4L, 2.228754579760e-01), (0L, 5L, 2.111669473429e-01), (0L, 6L, 4.799407190805e-01), (0L, 7L, 3.639911864625e-01), (0L, 8L, 6.947858598830e-01), (0L, 9L, 2.137434062812e-01), (1L, 0L, 1.997990966178e-01), (1L, 2L, 8.232738803226e-02), (1L, 3L, 1.487280153275e-01), (1L, 4L, 1.811394269082e-01), (1L, 5L, 4.318749070054e-01), (1L, 6L, 1.805549827630e-01), (1L, 7L, 2.031044587733e-01), (1L, 8L, 1.379549302261e-01), (1L, 9L, 9.072703100166e-02), (2L, 0L, 3.438741251510e-01), (2L, 1L, 8.232738803226e-02), (2L, 3L, 3.962129377163e-01), (2L, 4L, 1.468393804551e-01), (2L, 5L, 1.011844233815e-01), (2L, 6L, 2.913681119953e-01), (2L, 7L, 2.107258420207e-01), (2L, 8L, 5.761512990942e-01), (2L, 9L, 2.914080750559e-01), (3L, 0L, 5.084645547121e-01), (3L, 1L, 1.487280153275e-01), (3L, 2L, 3.962129377163e-01), (3L, 4L, 4.123285538511e-01), (3L, 5L, 2.365319708095e-01), (3L, 6L, 9.006682201122e-01), (3L, 7L, 6.704571955142e-01), (3L, 8L, 7.699293990309e-01), (3L, 9L, 5.264164083150e-01), (4L, 0L, 2.228754579760e-01), (4L, 1L, 1.811394269082e-01), (4L, 2L, 1.468393804551e-01), (4L, 3L, 4.123285538511e-01), (4L, 5L, 4.650305789265e-01), (4L, 6L, 5.463238327253e-01), (4L, 7L, 7.661566330118e-01), (4L, 8L, 2.544194531822e-01), (4L, 9L, 3.606532994232e-01), (5L, 0L, 2.111669473429e-01), (5L, 1L, 4.318749070054e-01), (5L, 2L, 1.011844233815e-01), (5L, 3L, 2.365319708095e-01), (5L, 4L, 4.650305789265e-01), (5L, 6L, 3.168065370999e-01), (5L, 7L, 4.263239066536e-01), (5L, 8L, 1.793300697535e-01), (5L, 9L, 1.573034975607e-01), (6L, 0L, 4.799407190805e-01), (6L, 1L, 1.805549827630e-01), (6L, 2L, 2.913681119953e-01), (6L, 3L, 9.006682201122e-01), (6L, 4L, 5.463238327253e-01), (6L, 5L, 3.168065370999e-01), (6L, 7L, 8.729481827509e-01), (6L, 8L, 6.082097572678e-01), (6L, 9L, 4.645101020686e-01), (7L, 0L, 3.639911864625e-01), (7L, 1L, 2.031044587733e-01), (7L, 2L, 2.107258420207e-01), (7L, 3L, 6.704571955142e-01), (7L, 4L, 7.661566330118e-01), (7L, 5L, 4.263239066536e-01), (7L, 6L, 8.729481827509e-01), (7L, 8L, 4.178341871825e-01), (7L, 9L, 4.118776956674e-01), (8L, 0L, 6.947858598830e-01), (8L, 1L, 1.379549302261e-01), (8L, 2L, 5.761512990942e-01), (8L, 3L, 7.699293990309e-01), (8L, 4L, 2.544194531822e-01), (8L, 5L, 1.793300697535e-01), (8L, 6L, 6.082097572678e-01), (8L, 7L, 4.178341871825e-01), (8L, 9L, 3.551252754453e-01), (9L, 0L, 2.137434062812e-01), (9L, 1L, 9.072703100166e-02), (9L, 2L, 2.914080750559e-01), (9L, 3L, 5.264164083150e-01), (9L, 4L, 3.606532994232e-01), (9L, 5L, 1.573034975607e-01), (9L, 6L, 4.645101020686e-01), (9L, 7L, 4.118776956674e-01), (9L, 8L, 3.551252754453e-01)
+  val denseUnnormLowDimAffinitiesResults: Seq[(Int, Int, Double)] = List(
+    (0, 1, 1.997990966178e-01), (0, 2, 3.438741251510e-01), (0, 3, 5.084645547121e-01), (0, 4, 2.228754579760e-01), (0, 5, 2.111669473429e-01), (0, 6, 4.799407190805e-01), (0, 7, 3.639911864625e-01), (0, 8, 6.947858598830e-01), (0, 9, 2.137434062812e-01), (1, 0, 1.997990966178e-01), (1, 2, 8.232738803226e-02), (1, 3, 1.487280153275e-01), (1, 4, 1.811394269082e-01), (1, 5, 4.318749070054e-01), (1, 6, 1.805549827630e-01), (1, 7, 2.031044587733e-01), (1, 8, 1.379549302261e-01), (1, 9, 9.072703100166e-02), (2, 0, 3.438741251510e-01), (2, 1, 8.232738803226e-02), (2, 3, 3.962129377163e-01), (2, 4, 1.468393804551e-01), (2, 5, 1.011844233815e-01), (2, 6, 2.913681119953e-01), (2, 7, 2.107258420207e-01), (2, 8, 5.761512990942e-01), (2, 9, 2.914080750559e-01), (3, 0, 5.084645547121e-01), (3, 1, 1.487280153275e-01), (3, 2, 3.962129377163e-01), (3, 4, 4.123285538511e-01), (3, 5, 2.365319708095e-01), (3, 6, 9.006682201122e-01), (3, 7, 6.704571955142e-01), (3, 8, 7.699293990309e-01), (3, 9, 5.264164083150e-01), (4, 0, 2.228754579760e-01), (4, 1, 1.811394269082e-01), (4, 2, 1.468393804551e-01), (4, 3, 4.123285538511e-01), (4, 5, 4.650305789265e-01), (4, 6, 5.463238327253e-01), (4, 7, 7.661566330118e-01), (4, 8, 2.544194531822e-01), (4, 9, 3.606532994232e-01), (5, 0, 2.111669473429e-01), (5, 1, 4.318749070054e-01), (5, 2, 1.011844233815e-01), (5, 3, 2.365319708095e-01), (5, 4, 4.650305789265e-01), (5, 6, 3.168065370999e-01), (5, 7, 4.263239066536e-01), (5, 8, 1.793300697535e-01), (5, 9, 1.573034975607e-01), (6, 0, 4.799407190805e-01), (6, 1, 1.805549827630e-01), (6, 2, 2.913681119953e-01), (6, 3, 9.006682201122e-01), (6, 4, 5.463238327253e-01), (6, 5, 3.168065370999e-01), (6, 7, 8.729481827509e-01), (6, 8, 6.082097572678e-01), (6, 9, 4.645101020686e-01), (7, 0, 3.639911864625e-01), (7, 1, 2.031044587733e-01), (7, 2, 2.107258420207e-01), (7, 3, 6.704571955142e-01), (7, 4, 7.661566330118e-01), (7, 5, 4.263239066536e-01), (7, 6, 8.729481827509e-01), (7, 8, 4.178341871825e-01), (7, 9, 4.118776956674e-01), (8, 0, 6.947858598830e-01), (8, 1, 1.379549302261e-01), (8, 2, 5.761512990942e-01), (8, 3, 7.699293990309e-01), (8, 4, 2.544194531822e-01), (8, 5, 1.793300697535e-01), (8, 6, 6.082097572678e-01), (8, 7, 4.178341871825e-01), (8, 9, 3.551252754453e-01), (9, 0, 2.137434062812e-01), (9, 1, 9.072703100166e-02), (9, 2, 2.914080750559e-01), (9, 3, 5.264164083150e-01), (9, 4, 3.606532994232e-01), (9, 5, 1.573034975607e-01), (9, 6, 4.645101020686e-01), (9, 7, 4.118776956674e-01), (9, 8, 3.551252754453e-01)
   ).toSeq
 
-  val initialEmbedding: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(1.764052345968e+00, 4.001572083672e-01)),
-    LabeledVector(1.0, DenseVector(9.787379841057e-01, 2.240893199201e+00)),
-    LabeledVector(2.0, DenseVector(1.867557990150e+00, -9.772778798764e-01)),
-    LabeledVector(3.0, DenseVector(9.500884175256e-01, -1.513572082977e-01)),
-    LabeledVector(4.0, DenseVector(-1.032188517936e-01, 4.105985019384e-01)),
-    LabeledVector(5.0, DenseVector(1.440435711609e-01, 1.454273506963e+00)),
-    LabeledVector(6.0, DenseVector(7.610377251470e-01, 1.216750164928e-01)),
-    LabeledVector(7.0, DenseVector(4.438632327454e-01, 3.336743273743e-01)),
-    LabeledVector(8.0, DenseVector(1.494079073158e+00, -2.051582637658e-01)),
-    LabeledVector(9.0, DenseVector(3.130677016509e-01, -8.540957393017e-01))
+  val initialEmbedding: Seq[(Int, Vector[Double])] = List(
+    (0, DenseVector(1.764052345968e+00, 4.001572083672e-01)),
+    (1, DenseVector(9.787379841057e-01, 2.240893199201e+00)),
+    (2, DenseVector(1.867557990150e+00, -9.772778798764e-01)),
+    (3, DenseVector(9.500884175256e-01, -1.513572082977e-01)),
+    (4, DenseVector(-1.032188517936e-01, 4.105985019384e-01)),
+    (5, DenseVector(1.440435711609e-01, 1.454273506963e+00)),
+    (6, DenseVector(7.610377251470e-01, 1.216750164928e-01)),
+    (7, DenseVector(4.438632327454e-01, 3.336743273743e-01)),
+    (8, DenseVector(1.494079073158e+00, -2.051582637658e-01)),
+    (9, DenseVector(3.130677016509e-01, -8.540957393017e-01))
   ).toSeq
 
-  val denseGradientResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(2.039671351114e-02, -2.841077532513e-02)),
-    LabeledVector(1.0, DenseVector(-8.392113494907e-03, 2.231906609600e-03)),
-    LabeledVector(2.0, DenseVector(4.925836551601e-03, 1.893423603195e-02)),
-    LabeledVector(3.0, DenseVector(-2.069923187117e-03, 3.379074534054e-02)),
-    LabeledVector(4.0, DenseVector(9.411374074020e-03, 5.816153185684e-03)),
-    LabeledVector(5.0, DenseVector(6.038471365385e-03, -9.556999264301e-04)),
-    LabeledVector(6.0, DenseVector(-3.232836693981e-02, 1.179730064230e-02)),
-    LabeledVector(7.0, DenseVector(-2.424283588089e-02, -2.266466720419e-02)),
-    LabeledVector(8.0, DenseVector(4.632554267724e-02, -1.538485019566e-02)),
-    LabeledVector(9.0, DenseVector(-2.006469867665e-02, -5.154349158673e-03))
+  val denseGradientResults: Seq[(Int, Vector[Double])] = List(
+    (0, DenseVector(2.039671351114e-02, -2.841077532513e-02)),
+    (1, DenseVector(-8.392113494907e-03, 2.231906609600e-03)),
+    (2, DenseVector(4.925836551601e-03, 1.893423603195e-02)),
+    (3, DenseVector(-2.069923187117e-03, 3.379074534054e-02)),
+    (4, DenseVector(9.411374074020e-03, 5.816153185684e-03)),
+    (5, DenseVector(6.038471365385e-03, -9.556999264301e-04)),
+    (6, DenseVector(-3.232836693981e-02, 1.179730064230e-02)),
+    (7, DenseVector(-2.424283588089e-02, -2.266466720419e-02)),
+    (8, DenseVector(4.632554267724e-02, -1.538485019566e-02)),
+    (9, DenseVector(-2.006469867665e-02, -5.154349158673e-03))
   ).toSeq
 
-  val gradientWithMomentumAndGainResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(-7.342816864009e+00, 6.818586078031e+00)),
-    LabeledVector(1.0, DenseVector(2.014107238778e+00, -8.034863794560e-01)),
-    LabeledVector(2.0, DenseVector(-1.773301158576e+00, -6.816324971503e+00)),
-    LabeledVector(3.0, DenseVector(4.967815649080e-01, -1.216466832260e+01)),
-    LabeledVector(4.0, DenseVector(-3.388094666647e+00, -2.093815146846e+00)),
-    LabeledVector(5.0, DenseVector(-2.173849691539e+00, 2.293679823432e-01)),
-    LabeledVector(6.0, DenseVector(7.758808065556e+00, -4.247028231228e+00)),
-    LabeledVector(7.0, DenseVector(5.818280611414e+00, 5.439520129006e+00)),
-    LabeledVector(8.0, DenseVector(-1.667719536380e+01, 3.692364046958e+00)),
-    LabeledVector(9.0, DenseVector(4.815527682396e+00, 1.237043798081e+00))
+  val gradientWithMomentumAndGainResults: Seq[(Int, Vector[Double])] = List(
+    (0, DenseVector(-7.342816864009e+00, 6.818586078031e+00)),
+    (1, DenseVector(2.014107238778e+00, -8.034863794560e-01)),
+    (2, DenseVector(-1.773301158576e+00, -6.816324971503e+00)),
+    (3, DenseVector(4.967815649080e-01, -1.216466832260e+01)),
+    (4, DenseVector(-3.388094666647e+00, -2.093815146846e+00)),
+    (5, DenseVector(-2.173849691539e+00, 2.293679823432e-01)),
+    (6, DenseVector(7.758808065556e+00, -4.247028231228e+00)),
+    (7, DenseVector(5.818280611414e+00, 5.439520129006e+00)),
+    (8, DenseVector(-1.667719536380e+01, 3.692364046958e+00)),
+    (9, DenseVector(4.815527682396e+00, 1.237043798081e+00))
   ).toSeq
 
-  val updatedGainsResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
-    LabeledVector(1.0, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
-    LabeledVector(2.0, DenseVector(1.200000000000e+00, 1.200000000000e+00)),
-    LabeledVector(3.0, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
-    LabeledVector(4.0, DenseVector(1.200000000000e+00, 1.200000000000e+00)),
-    LabeledVector(5.0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
-    LabeledVector(6.0, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
-    LabeledVector(7.0, DenseVector(8.000000000000e-01, 8.000000000000e-01)),
-    LabeledVector(8.0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
-    LabeledVector(9.0, DenseVector(8.000000000000e-01, 8.000000000000e-01))
+  val updatedGainsResults: Seq[(Int, Vector[Double])] = List(
+    (0, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
+    (1, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
+    (2, DenseVector(1.200000000000e+00, 1.200000000000e+00)),
+    (3, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
+    (4, DenseVector(1.200000000000e+00, 1.200000000000e+00)),
+    (5, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
+    (6, DenseVector(8.000000000000e-01, 1.200000000000e+00)),
+    (7, DenseVector(8.000000000000e-01, 8.000000000000e-01)),
+    (8, DenseVector(1.200000000000e+00, 8.000000000000e-01)),
+    (9, DenseVector(8.000000000000e-01, 8.000000000000e-01))
   ).toSeq
 
-  val updatedEmbeddingResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(-5.578764518042e+00, 7.218743286398e+00)),
-    LabeledVector(1.0, DenseVector(2.992845222883e+00, 1.437406819745e+00)),
-    LabeledVector(2.0, DenseVector(9.425683157355e-02, -7.793602851380e+00)),
-    LabeledVector(3.0, DenseVector(1.446869982434e+00, -1.231602553089e+01)),
-    LabeledVector(4.0, DenseVector(-3.491313518441e+00, -1.683216644908e+00)),
-    LabeledVector(5.0, DenseVector(-2.029806120378e+00, 1.683641489306e+00)),
-    LabeledVector(6.0, DenseVector(8.519845790703e+00, -4.125353214736e+00)),
-    LabeledVector(7.0, DenseVector(6.262143844159e+00, 5.773194456381e+00)),
-    LabeledVector(8.0, DenseVector(-1.518311629065e+01, 3.487205783192e+00)),
-    LabeledVector(9.0, DenseVector(5.128595384047e+00, 3.829480587797e-01))
+  val updatedEmbeddingResults: Seq[(Int, Vector[Double])] = List(
+    (0, DenseVector(-5.578764518042e+00, 7.218743286398e+00)),
+    (1, DenseVector(2.992845222883e+00, 1.437406819745e+00)),
+    (2, DenseVector(9.425683157355e-02, -7.793602851380e+00)),
+    (3, DenseVector(1.446869982434e+00, -1.231602553089e+01)),
+    (4, DenseVector(-3.491313518441e+00, -1.683216644908e+00)),
+    (5, DenseVector(-2.029806120378e+00, 1.683641489306e+00)),
+    (6, DenseVector(8.519845790703e+00, -4.125353214736e+00)),
+    (7, DenseVector(6.262143844159e+00, 5.773194456381e+00)),
+    (8, DenseVector(-1.518311629065e+01, 3.487205783192e+00)),
+    (9, DenseVector(5.128595384047e+00, 3.829480587797e-01))
   ).toSeq
 
-  val updatedAndCentredEmbeddingResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, DenseVector(-5.394920178871e+00, 7.812249121209e+00)),
-    LabeledVector(1.0, DenseVector(3.176689562054e+00, 2.030912654557e+00)),
-    LabeledVector(2.0, DenseVector(2.781011707444e-01, -7.200097016568e+00)),
-    LabeledVector(3.0, DenseVector(1.630714321604e+00, -1.172251969608e+01)),
-    LabeledVector(4.0, DenseVector(-3.307469179270e+00, -1.089710810096e+00)),
-    LabeledVector(5.0, DenseVector(-1.845961781207e+00, 2.277147324118e+00)),
-    LabeledVector(6.0, DenseVector(8.703690129873e+00, -3.531847379924e+00)),
-    LabeledVector(7.0, DenseVector(6.445988183330e+00, 6.366700291192e+00)),
-    LabeledVector(8.0, DenseVector(-1.499927195148e+01, 4.080711618003e+00)),
-    LabeledVector(9.0, DenseVector(5.312439723218e+00, 9.764538935911e-01))
+  val updatedAndCentredEmbeddingResults: Seq[(Int, Vector[Double])] = List(
+    (0, DenseVector(-5.394920178871e+00, 7.812249121209e+00)),
+    (1, DenseVector(3.176689562054e+00, 2.030912654557e+00)),
+    (2, DenseVector(2.781011707444e-01, -7.200097016568e+00)),
+    (3, DenseVector(1.630714321604e+00, -1.172251969608e+01)),
+    (4, DenseVector(-3.307469179270e+00, -1.089710810096e+00)),
+    (5, DenseVector(-1.845961781207e+00, 2.277147324118e+00)),
+    (6, DenseVector(8.703690129873e+00, -3.531847379924e+00)),
+    (7, DenseVector(6.445988183330e+00, 6.366700291192e+00)),
+    (8, DenseVector(-1.499927195148e+01, 4.080711618003e+00)),
+    (9, DenseVector(5.312439723218e+00, 9.764538935911e-01))
   ).toSeq
 
-  val centeringInput: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, -2.0),(1, 4.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -6.0),(1, 4.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 2.0),(1, -8.0))))
+  val centeringInput: Seq[(Int, Vector[Double])] = List(
+    (0, SparseVector(2)(0 -> -2.0, 1 -> 4.0)),
+    (1, SparseVector(2)(0 -> -6.0, 1 -> 4.0)),
+    (2, SparseVector(2)(0 -> 2.0, 1 -> -8.0))
   ).toSeq
 
-  val centeringResults: Seq[LabeledVector] = List(
-    LabeledVector(0.0, SparseVector.fromCOO(2, List((0, 0.0),(1, 4.0)))),
-    LabeledVector(1.0, SparseVector.fromCOO(2, List((0, -4.0),(1, 4.0)))),
-    LabeledVector(2.0, SparseVector.fromCOO(2, List((0, 4.0),(1, -8.0))))
+  val centeringResults: Seq[(Int, Vector[Double])] = List(
+    (0, SparseVector(2)(0 -> 0.0, 1 -> 4.0)),
+    (1, SparseVector(2)(0 -> -4.0, 1 -> 4.0)),
+    (2, SparseVector(2)(0 -> 4.0, 1 -> -8.0))
   ).toSeq
 
   // C++ implementation
 
-  val sparsePairwiseAffinitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 5L, 0.999490),(0L, 4L, 0.000000),(1L, 5L, 0.999490),(1L, 6L, 0.000000),
-    (2L, 3L, 0.999490),(2L, 4L, 0.000000),(3L, 4L, 0.499252),(3L, 2L, 0.499252),
-    (4L, 3L, 0.499252),(4L, 5L, 0.499252),(5L, 6L, 0.499252),(5L, 4L, 0.499252),
-    (6L, 5L, 0.499252),(6L, 7L, 0.499252),(7L, 9L, 0.999490),(7L, 6L, 0.000000),
-    (8L, 9L, 0.999490),(8L, 7L, 0.000000),(9L, 8L, 0.999490),(9L, 7L, 0.000000),
-    (10L, 11L, 0.999490),(10L, 8L, 0.000000),(11L, 10L, 0.999490),(11L, 8L, 0.000000)
+  val sparsePairwiseAffinitiesResults: Seq[(Int, Int, Double)] = List(
+    (0, 5, 0.999490),(0, 4, 0.000000),(1, 5, 0.999490),(1, 6, 0.000000),
+    (2, 3, 0.999490),(2, 4, 0.000000),(3, 4, 0.499252),(3, 2, 0.499252),
+    (4, 3, 0.499252),(4, 5, 0.499252),(5, 6, 0.499252),(5, 4, 0.499252),
+    (6, 5, 0.499252),(6, 7, 0.499252),(7, 9, 0.999490),(7, 6, 0.000000),
+    (8, 9, 0.999490),(8, 7, 0.000000),(9, 8, 0.999490),(9, 7, 0.000000),
+    (10, 11, 0.999490),(10, 8, 0.000000),(11, 10, 0.999490),(11, 8, 0.000000)
   ).toSeq
 
-  val sparseJointProbabilitiesResults: Seq[(Long, Long, Double)] = List(
-    (0L, 5L, 0.041680),(0L, 4L, 0.000000),(1L, 5L, 0.041680),(1L, 6L, 0.000000),
-    (2L, 3L, 0.062500),(2L, 4L, 0.000000),(3L, 2L, 0.062500),(3L, 4L, 0.041639),
-    (4L, 0L, 0.000000),(4L, 2L, 0.000000),(4L, 3L, 0.041639),(4L, 5L, 0.041639),
-    (5L, 0L, 0.041680),(5L, 1L, 0.041680),(5L, 4L, 0.041639),(5L, 6L, 0.041639),
-    (6L, 1L, 0.000000),(6L, 5L, 0.041639),(6L, 7L, 0.020820),(7L, 6L, 0.020820),
-    (7L, 9L, 0.041680),(7L, 8L, 0.000000),(8L, 9L, 0.083361),(8L, 7L, 0.000000),
-    (8L, 10L, 0.000000),(8L, 11L, 0.000000),(9L, 7L, 0.041680),(9L, 8L, 0.083361),
-    (10L, 11L, 0.083361),(10L, 8L, 0.000000),(11L, 10L, 0.083361),(11L, 8L, 0.000000)
+  val sparseJointProbabilitiesResults: Seq[(Int, Int, Double)] = List(
+    (0, 5, 0.041680),(0, 4, 0.000000),(1, 5, 0.041680),(1, 6, 0.000000),
+    (2, 3, 0.062500),(2, 4, 0.000000),(3, 2, 0.062500),(3, 4, 0.041639),
+    (4, 0, 0.000000),(4, 2, 0.000000),(4, 3, 0.041639),(4, 5, 0.041639),
+    (5, 0, 0.041680),(5, 1, 0.041680),(5, 4, 0.041639),(5, 6, 0.041639),
+    (6, 1, 0.000000),(6, 5, 0.041639),(6, 7, 0.020820),(7, 6, 0.020820),
+    (7, 9, 0.041680),(7, 8, 0.000000),(8, 9, 0.083361),(8, 7, 0.000000),
+    (8, 10, 0.000000),(8, 11, 0.000000),(9, 7, 0.041680),(9, 8, 0.083361),
+    (10, 11, 0.083361),(10, 8, 0.000000),(11, 10, 0.083361),(11, 8, 0.000000)
   )
-
-  val yInit: Seq[LabeledVector] = List(
-    LabeledVector(0, new DenseVector(Array(0.00011122716070838681,0.00006080563805333057))),
-    LabeledVector(1, new DenseVector(Array(-0.00007120823209735604,-0.00017189452155069314))),
-    LabeledVector(2, new DenseVector(Array(-0.00004000535669646060,-0.00022717203149772645))),
-    LabeledVector(3, new DenseVector(Array(0.00008663309627528085,-0.00010325765463991235))),
-    LabeledVector(4, new DenseVector(Array(-0.00003582032920213515,-0.00011138115570423478))),
-    LabeledVector(5, new DenseVector(Array(0.00000474475662365405,0.00008448473882524468))),
-    LabeledVector(6, new DenseVector(Array(0.00022241394002237897,-0.00000064174153521060))),
-    LabeledVector(7, new DenseVector(Array(-0.00007498357621804678,0.00001542291223429679))),
-    LabeledVector(8, new DenseVector(Array(-0.00002279772806102704,-0.00013284059681958318))),
-    LabeledVector(9, new DenseVector(Array(0.00000541931482402651,-0.00010620372323138086))),
-    LabeledVector(10, new DenseVector(Array(0.00007868893550591110,-0.00000695497272360187))),
-    LabeledVector(11, new DenseVector(Array(-0.00017049612819062857,-0.00006410186066559613)))
-  )
-
-  //calculated by c++ program
-  val distancesDenseWithoutVectorDiff: Seq[(Long, Long, Double)] = List(
-    (0L, 1L, 0.00000008743203682792),
-    (0L, 2L, 0.00000010580241248067),
-    (0L, 3L, 0.00000002752163201469),
-    (0L, 4L, 0.00000005127125623350),
-    (0L, 5L, 0.00000001189920219303),
-    (0L, 6L, 0.00000001613828035252),
-    (0L, 7L, 0.00000003673403034945),
-    (0L, 8L, 0.00000005546153509011),
-    (0L, 9L, 0.00000003908742700742),
-    (0L, 10L, 0.00000000565023647219),
-    (0L, 11L, 0.00000009496989474430),
-    (1L, 0L, 0.00000008743203682792),
-    (1L, 2L, 0.00000000402922253923),
-    (1L, 3L, 0.00000002962490444177),
-    (1L, 4L, 0.00000000491417111739),
-    (1L, 5L, 0.00000007149918164657),
-    (1L, 6L, 0.00000011554149462334),
-    (1L, 7L, 0.00000003510207422302),
-    (1L, 8L, 0.00000000386878593795),
-    (1L, 9L, 0.00000001018706193102),
-    (1L, 10L, 0.00000004967421562277),
-    (1L, 11L, 0.00000002147734405132),
-    (2L, 0L, 0.00000010580241248067),
-    (2L, 1L, 0.00000000402922253923),
-    (2L, 3L, 0.00000003139207056314),
-    (2L, 4L, 0.00000001342504137215),
-    (2L, 5L, 0.00000009913251513031),
-    (2L, 6L, 0.00000012017985956091),
-    (2L, 7L, 0.00000006007578256524),
-    (2L, 8L, 0.00000000919452205169),
-    (2L, 9L, 0.00000001669673238757),
-    (2L, 10L, 0.00000006258388797655),
-    (2L, 11L, 0.00000004361972206036),
-    (3L, 0L, 0.00000002752163201469),
-    (3L, 1L, 0.00000002962490444177),
-    (3L, 2L, 0.00000003139207056314),
-    (3L, 4L, 0.00000001506083268070),
-    (3L, 5L, 0.00000004195290647493),
-    (3L, 6L, 0.00000002896646315099),
-    (3L, 7L, 0.00000004020502578140),
-    (3L, 8L, 0.00000001285025578293),
-    (3L, 9L, 0.00000000660435761776),
-    (3L, 10L, 0.00000000933731623460),
-    (3L, 11L, 0.00000006764861427620),
-    (4L, 0L, 0.00000005127125623350),
-    (4L, 1L, 0.00000000491417111739),
-    (4L, 2L, 0.00000001342504137215),
-    (4L, 3L, 0.00000001506083268070),
-    (4L, 5L, 0.00000004000897482789),
-    (4L, 6L, 0.00000007894815565242),
-    (4L, 7L, 0.00000001761303156259),
-    (4L, 8L, 0.00000000063009575346),
-    (4L, 9L, 0.00000000172751404642),
-    (4L, 10L, 0.00000002401719939588),
-    (4L, 11L, 0.00000002037290257254),
-    (5L, 0L, 0.00000001189920219303),
-    (5L, 1L, 0.00000007149918164657),
-    (5L, 2L, 0.00000009913251513031),
-    (5L, 3L, 0.00000004195290647493),
-    (5L, 4L, 0.00000004000897482789),
-    (5L, 6L, 0.00000005462639106003),
-    (5L, 7L, 0.00000001112614294980),
-    (5L, 8L, 0.00000004798888997574),
-    (5L, 9L, 0.00000003636254459029),
-    (5L, 10L, 0.00000001382896243871),
-    (5L, 11L, 0.00000005278734525874),
-    (6L, 0L, 0.00000001613828035252),
-    (6L, 1L, 0.00000011554149462334),
-    (6L, 2L, 0.00000012017985956091),
-    (6L, 3L, 0.00000002896646315099),
-    (6L, 4L, 0.00000007894815565242),
-    (6L, 5L, 0.00000005462639106003),
-    (6L, 7L, 0.00000008870335576671),
-    (6L, 8L, 0.00000007760529950274),
-    (6L, 9L, 0.00000005822999934460),
-    (6L, 10L, 0.00000002069673381130),
-    (6L, 11L, 0.00000015840550842319),
-    (7L, 0L, 0.00000003673403034945),
-    (7L, 1L, 0.00000003510207422302),
-    (7L, 2L, 0.00000006007578256524),
-    (7L, 3L, 0.00000004020502578140),
-    (7L, 4L, 0.00000001761303156259),
-    (7L, 5L, 0.00000001112614294980),
-    (7L, 6L, 0.00000008870335576671),
-    (7L, 8L, 0.00000002470543086484),
-    (7L, 9L, 0.00000002125766334262),
-    (7L, 10L, 0.00000002411601059474),
-    (7L, 11L, 0.00000001544683708909),
-    (8L, 0L, 0.00000005546153509011),
-    (8L, 1L, 0.00000000386878593795),
-    (8L, 2L, 0.00000000919452205169),
-    (8L, 3L, 0.00000001285025578293),
-    (8L, 4L, 0.00000000063009575346),
-    (8L, 5L, 0.00000004798888997574),
-    (8L, 6L, 0.00000007760529950274),
-    (8L, 7L, 0.00000002470543086484),
-    (8L, 9L, 0.00000000150572454373),
-    (8L, 10L, 0.00000002614673323598),
-    (8L, 11L, 0.00000002653983124889),
-    (9L, 0L, 0.00000003908742700742),
-    (9L, 1L, 0.00000001018706193102),
-    (9L, 2L, 0.00000001669673238757),
-    (9L, 3L, 0.00000000660435761776),
-    (9L, 4L, 0.00000000172751404642),
-    (9L, 5L, 0.00000003636254459029),
-    (9L, 6L, 0.00000005822999934460),
-    (9L, 7L, 0.00000002125766334262),
-    (9L, 8L, 0.00000000150572454373),
-    (9L, 10L, 0.00000001521875179222),
-    (9L, 11L, 0.00000003271880992255),
-    (10L, 0L, 0.00000000565023647219),
-    (10L, 1L, 0.00000004967421562277),
-    (10L, 2L, 0.00000006258388797655),
-    (10L, 3L, 0.00000000933731623460),
-    (10L, 4L, 0.00000002401719939588),
-    (10L, 5L, 0.00000001382896243871),
-    (10L, 6L, 0.00000002069673381130),
-    (10L, 7L, 0.00000002411601059474),
-    (10L, 8L, 0.00000002614673323598),
-    (10L, 9L, 0.00000001521875179222),
-    (10L, 11L, 0.00000006535896277090),
-    (11L, 0L, 0.00000009496989474430),
-    (11L, 1L, 0.00000002147734405132),
-    (11L, 2L, 0.00000004361972206036),
-    (11L, 3L, 0.00000006764861427620),
-    (11L, 4L, 0.00000002037290257254),
-    (11L, 5L, 0.00000005278734525874),
-    (11L, 6L, 0.00000015840550842319),
-    (11L, 7L, 0.00000001544683708909),
-    (11L, 8L, 0.00000002653983124889),
-    (11L, 9L, 0.00000003271880992255),
-    (11L, 10L, 0.00000006535896277090)
-  )
-
-  private def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
-                        fields: Array[Int]): DataSet[LabeledVector] = {
-    env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
-      .groupBy(_._1).reduceGroup(
-        elements => {
-          val elementsIterable = elements.toIterable
-          val entries = elementsIterable.map(x => (x._2, x._3))
-          LabeledVector(elementsIterable.head._1.toDouble, SparseVector.fromCOO(dimension, entries))
-        })
-  }
 }
