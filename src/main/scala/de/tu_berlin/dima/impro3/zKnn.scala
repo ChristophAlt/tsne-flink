@@ -11,7 +11,7 @@ import org.apache.flink.api.scala._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml.common.LabeledVector
 import org.apache.flink.ml.math.DenseVector
-import org.apache.flink.ml.metrics.distances.DistanceMetric
+import org.apache.flink.ml.metrics.distances.{EuclideanDistanceMetric, DistanceMetric}
 import org.apache.flink.util
 
 import scala.collection.JavaConverters._
@@ -125,16 +125,18 @@ object zKnn extends Serializable {
 
     val cof = new Configuration
     cof.setInteger("k", k)
+    cof.setClass("metric", metric.getClass)
 
     //TODO Performance: I honestly don't know how fast this is going to be
     val cleaned = input.flatMap(flatMapper = new RichFlatMapFunction[LabeledVector, (Long, Long, Double)] {
       var reducedData: List[LabeledVector] = null
       var k = 0
-
+      var metric: DistanceMetric = new EuclideanDistanceMetric
       override def open(config: Configuration): Unit = {
         reducedData = getRuntimeContext
           .getBroadcastVariable[LabeledVector]("RESULT").asScala.toList
         k = config.getInteger("k", 0)
+
       }
 
       override def flatMap(dataPoint: LabeledVector, collector: util.Collector[(Long, Long, Double)]): Unit = {
@@ -236,26 +238,25 @@ object zKnn extends Serializable {
   }
 
 
+  def neighbors(reducedData: DataSet[LabeledVector],
+                dataPoint: org.apache.flink.ml.math.Vector
+                , k: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
 
-    def neighbors(reducedData: DataSet[LabeledVector],
-                  dataPoint: org.apache.flink.ml.math.Vector
-                  , k: Int, metric: DistanceMetric): DataSet[(Long, Long, Double)] = {
-
-      val distData = reducedData.map(word => metric.distance(dataPoint, word.vector) -> word)
-        .sortPartition(0, Order.ASCENDING)
-        .zipWithIndex.filter(wl => wl._1 < k).map(wl => (dataPoint.size.toLong, wl._2._2.label.toLong, wl._2._1))
+    val distData = reducedData.map(word => metric.distance(dataPoint, word.vector) -> word)
+      .sortPartition(0, Order.ASCENDING)
+      .zipWithIndex.filter(wl => wl._1 < k).map(wl => (dataPoint.size.toLong, wl._2._2.label.toLong, wl._2._1))
 
 
-      distData
+    distData
 
-      /** Spark Code
-        * val distData = reducedData.map(word => euclideanDist(dataPoint, word) -> word)
+    /** Spark Code
+      * val distData = reducedData.map(word => euclideanDist(dataPoint, word) -> word)
               .sortByKey(true)
               .zipWithIndex()
               .filter(word => word._2 < k).map(word => word._1._2)
       distData
-        */
+      */
 
-    }
+  }
 
 }
