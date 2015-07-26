@@ -213,27 +213,26 @@ object TsneHelpers {
                metric: (Vector[Double], Vector[Double]) => Double, theta: Double, dimension:Int, iterOffset: Int=0):
     DataSet[(Int, Vector[Double])] = {
 
-    // find xMin, xMax, yMin and yMax, as well as meanX and meanY
-    val boundaryAndMean = embedding.map(x => (x._2(0), x._2(0), x._2(1), x._2(1), x._2(0), x._2(1), 1))
-      .reduce((x, y) => (scala.math.min(x._1, y._1), scala.math.max(x._2, y._2), scala.math.min(x._3, y._3), scala.math.max(x._4, y._4), x._5 + y._5, x._6 + y._6, x._7 + y._7))
+    // find xMin, xMax, yMin and yMax, as well as sum and count
+    val boundaryAndMean = embedding.map(x => (x._2(0), x._2(0), x._2(1), x._2(1), DenseVector.fill(2, 0.0), 1))
+      .reduce((x, y) => (scala.math.min(x._1, y._1), scala.math.max(x._2, y._2), scala.math.min(x._3, y._3), scala.math.max(x._4, y._4), x._5 + y._5, x._6 + y._6))
 
     // compute repulsive forces
     val tree = embedding
       .reduceGroup(new RichGroupReduceFunction[(Int, Vector[Double]), QuadTree] {
-      private var boundaryAndMean: (Double, Double, Double, Double, Double, Double, Int) = null
+      private var boundaryAndMean: (Double, Double, Double, Double, Vector[Double], Int) = null
 
       override def open(parameters: Configuration) {
         boundaryAndMean = getRuntimeContext
-          .getBroadcastVariable[(Double, Double, Double, Double, Double, Double, Int)]("boundaryAndMean").get(0)
+          .getBroadcastVariable[(Double, Double, Double, Double, Vector[Double], Int)]("boundaryAndMean").get(0)
       }
 
       def reduce(embedding: java.lang.Iterable[(Int, Vector[Double])],
                   out: Collector[QuadTree]) = {
-        val (minX, maxX, minY, maxY, sumX, sumY, count) = boundaryAndMean
+        val (minX, maxX, minY, maxY, sum, count) = boundaryAndMean
 
-        val meanX = sumX / count
-        val meanY = sumY / count
-        val tree = QuadTree(None, Cell(meanX, meanY, scala.math.max(maxX - minX, maxY - minY)))
+        val mean = sum / count.toDouble
+        val tree = QuadTree(None, Cell(mean(0), mean(1), scala.math.max(maxX - minX, maxY - minY)))
 
         for (v <- embedding.asScala) {
           tree.insert(v._2)
@@ -366,7 +365,7 @@ object TsneHelpers {
         val newGradient = new DenseVector[Double](d)
 
         for (i <- 0 until d) {
-          if ((currentGradient (i) > 0.0) == (previousGradient(i) > 0.0)) {
+          if ((currentGradient(i) > 0.0) == (previousGradient(i) > 0.0)) {
             newGain(i) = scala.math.max(gain(i) * 0.8, minGain)
           } else {
             newGain(i) = scala.math.max(gain(i) + 0.2, minGain)
