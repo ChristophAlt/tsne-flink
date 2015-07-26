@@ -25,11 +25,16 @@ import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala._
 import org.apache.flink.core.fs.FileSystem.WriteMode
 
+import java.io._
+
+
 object Tsne {
 
   def main(args: Array[String]) {
     val parameters = ParameterTool.fromArgs(args)
     val env = ExecutionEnvironment.getExecutionEnvironment
+
+    val getExecutionPlan = parameters.has("executionPlan")
 
     // get parameters from command line or use default
     val inputPath = parameters.getRequired("input")
@@ -62,12 +67,20 @@ object Tsne {
 
     result.map(x=> (x._1, x._2(0), x._2(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
-    val executionResult = env.execute("TSNE")
+    if (getExecutionPlan) {
+      val executionPlan = env.getExecutionPlan()
 
-    import java.io._
-    val pw = new PrintWriter(new File(lossFile))
-    pw.write(executionResult.getAccumulatorResult("loss").toString)
-    pw.close
+      val pw = new PrintWriter(new File("executionPlan.json"))
+      pw.write(executionPlan)
+      pw.close
+
+    } else {
+      val executionResult = env.execute("TSNE")
+
+      val pw = new PrintWriter(new File(lossFile))
+      pw.write(executionResult.getAccumulatorResult("loss").toString)
+      pw.close
+    }
   }
 
   def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,

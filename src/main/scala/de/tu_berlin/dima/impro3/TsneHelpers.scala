@@ -43,15 +43,15 @@ object TsneHelpers {
       (v1, v2) =>
         //   i         j     /----------------- d ----------------\
         (v1._1, v2._1, metric(v1._2, v2._2))
-    }
+    }.withForwardedFieldsFirst("_1->_1").withForwardedFieldsSecond("_1->_2")
       // remove distances == 0
-      .filter(x => x._1 != x._2)
+      .filter(x => x._1 != x._2).withForwardedFields("_1")
       // group by i
       .groupBy(_._1)
       // sort
       .sortGroup(_._3, Order.ASCENDING)
       // either take the n nearest neighbors or take the 3u nearest neighbors by default
-      .first(k)
+      .first(k).withForwardedFields("_1")
   }
 
   def partitionKnn(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double, blocks: Int):
@@ -92,25 +92,27 @@ object TsneHelpers {
       DenseVector.rand[Double](dimension)
     }
 
-    val nnInput = input.map(x => (x._1, x._2, x._2))
 
-    var possibleNeighbors = findPossibleNeighbors(nnInput, k, metric)
 
-    for (randomVector <- randomVectors) {
+    val nnInput = input.map(x => (x._1, x._2, x._2)).withForwardedFields("_1", "_2", "_2->_3")
+
+    var initialNeighbors = findPossibleNeighbors(nnInput, k, metric)
+
+    val otherNeighbors = for (randomVector <- randomVectors) yield {
       val projectedVectors = nnInput.map(x => (x._1, x._2 + randomVector, x._2)).withForwardedFields("_1", "_2->_3")
-
-      possibleNeighbors = possibleNeighbors
-        .union(findPossibleNeighbors(projectedVectors, k, metric))
+      findPossibleNeighbors(projectedVectors, k, metric)
     }
 
+    val possibleNeighbors = initialNeighbors.union(otherNeighbors.reduce((x, y) => x.union(y)))
+
     possibleNeighbors
-      .groupBy(x => (x._1, x._2)).reduceGroup {
+      .groupBy(0, 1).reduceGroup {
       (iter, out: Collector[(Int, Int, Vector[Double], Vector[Double])]) => {
         if (iter.hasNext) {
           out.collect(iter.next())
         }
       }
-    }.withForwardedFields("_1", "_2", "_3", "_4").groupBy(_._1).reduceGroup {
+    }.groupBy(_._1).reduceGroup {
       (iter, out: Collector[(Int, Int, Double)]) => {
         if (iter.hasNext) {
           val iterSeq = iter.toSeq
@@ -166,7 +168,7 @@ object TsneHelpers {
         for (p <- pwAffinities) {
           affinities.collect(p)
         }
-    }
+    }.withForwardedFields("_1")
   }
 
   def jointDistribution(input: DataSet[(Int, Int, Double)]): DataSet[(Int, Int, Double)] = {
@@ -204,7 +206,7 @@ object TsneHelpers {
         
         (inp._1, y, lastGradient, gains)
       }
-    })
+    }).withForwardedFields("_1")
   }
 
   def gradient(highDimAffinities: DataSet[(Int, Vector[Double])], embedding: DataSet[(Int, Vector[Double])],
@@ -257,7 +259,8 @@ object TsneHelpers {
         val (repForce, sumQ) = tree.computeRepulsiveForce(leftVector, theta)
         (index, repForce, sumQ)
       }
-    }).withBroadcastSet(tree, "tree")
+    }).withForwardedFields("_1")
+      .withBroadcastSet(tree, "tree")
 
     val sumQ = repForcesAndSum.map(x => x._3).reduce((x, y) => x + y)
 
@@ -302,7 +305,8 @@ object TsneHelpers {
 
         (i, partialGradient)
       }
-    }).withBroadcastSet(embedding, "embedding")
+    }).withForwardedFields("_1")
+      .withBroadcastSet(embedding, "embedding")
       .withBroadcastSet(sumQ, "sumQ")
       //.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2 + v2._2))
 
@@ -321,13 +325,13 @@ object TsneHelpers {
 
         (vectors._1._1, attrForce - repForce)
       }
-    }).withBroadcastSet(sumQ, "sumQ")
+    }).withForwardedFields("_1._1->_1").withBroadcastSet(sumQ, "sumQ")
   }
 
   def centerEmbedding(embedding: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])]):
   DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
     // center embedding
-    val sumAndCount = embedding.map(x => (x._2, 1)).reduce((x, y) => (x._1 + y._1, x._2 + y._2))
+    val sumAndCount = embedding.map(x => (x._2, 1)).withForwardedFields("_2->_1").reduce((x, y) => (x._1 + y._1, x._2 + y._2))
 
     embedding.mapWithBcVariable(sumAndCount) {
       (v, sumAndCount) => (v._1, v._2 - (sumAndCount._1 :/ sumAndCount._2.toDouble), v._3, v._4)
@@ -383,7 +387,7 @@ object TsneHelpers {
       // (index, embedding, gradient, gains)
       workingSet =>
 
-      val currentEmbedding = workingSet.map(t => (t._1, t._2))
+      val currentEmbedding = workingSet.map(t => (t._1, t._2)).withForwardedFields("_1", "_2")
 
       val dY = gradient(highdimAffinites, currentEmbedding, metric, theta, dimension ,iterOffset)
 
