@@ -35,20 +35,6 @@ class QuadTree(var parent: Option[QuadTree], val boundary: Cell)
   var sum = DenseVector(0.0, 0.0)
   var thisPoint: Option[Vector[Double]] = None
 
-  /*private def createCell(points: List[Point]): Cell = {
-    val listX = points.map(p => p.x)
-    val listY = points.map(p => p.y)
-    val meanX = listX.sum / points.size
-    val meanY = listY.sum / points.size
-
-    val minX = listX.min
-    val minY = listY.min
-    val maxX = listX.max
-    val maxY = listY.max
-
-    Cell(meanX, meanY, max(maxX - meanX, meanX - minX), max(maxY - meanY, meanY - minY))
-  }*/
-
   def insert(point: Vector[Double]): Boolean = {
 
     if (boundary.contains(point)) {

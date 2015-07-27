@@ -195,11 +195,11 @@ object TsneHelpers {
     }
   }
 
-  def initWorkingSet(input: DataSet[(Int, Vector[Double])], nComponents: Int, randomState: Int):
+  def initWorkingSet(input: DataSet[(Int, SparseVector[Double])], nComponents: Int, randomState: Int):
   DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
     // init Y (embedding) by sampling from N(0, I)
     input
-      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double], Vector[Double],
+      .map(new RichMapFunction[(Int, SparseVector[Double]), (Int, Vector[Double], Vector[Double],
       Vector[Double])] {
       private var gaussian: Rand[Double] = null
 
@@ -207,7 +207,7 @@ object TsneHelpers {
         gaussian = Rand.gaussian(0, 1e-4)
       }
 
-      def map(inp: (Int, Vector[Double])): (Int, Vector[Double], Vector[Double], Vector[Double]) = {
+      def map(inp: (Int, SparseVector[Double])): (Int, Vector[Double], Vector[Double], Vector[Double]) = {
 
         val y = DenseVector.rand[Double](nComponents, gaussian)
         val lastGradient = DenseVector.fill(nComponents, 0.0)
@@ -218,7 +218,7 @@ object TsneHelpers {
     }).withForwardedFields("_1")
   }
 
-  def gradient(highDimAffinities: DataSet[(Int, Vector[Double])],
+  def gradient(highDimAffinities: DataSet[(Int, SparseVector[Double])],
                embedding: DataSet[(Int, Vector[Double])],
                metric: (Vector[Double], Vector[Double]) => Double,
                theta: Double, dimension:Int, iterOffset: Int=0):
@@ -244,45 +244,30 @@ object TsneHelpers {
       def reduce(embedding: java.lang.Iterable[(Int, Vector[Double])],
                   out: Collector[QuadTree]) = {
         val (minX, maxX, minY, maxY, sum, count) = boundaryAndMean
-
         val mean = sum / count.toDouble
-        LOG.info("Start building QuadTree")
         val tree = QuadTree(None, Cell(mean(0), mean(1), scala.math.max(maxX - minX, maxY - minY)))
 
         for (v <- embedding.asScala) {
           tree.insert(v._2)
         }
-        LOG.info("Finished building QuadTree")
+
         out.collect(tree)
-        LOG.info("Tree collected")
       }
     }).withBroadcastSet(boundaryAndMean, "boundaryAndMean")
 
-    // compute repulsive forces
-    val repForcesAndSum = embedding
-      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double], Double)] {
-      private var tree: QuadTree = null
-
-      override def open(parameters: Configuration) {
-        tree = getRuntimeContext.getBroadcastVariable[QuadTree]("tree").get(0)
-      }
-
-      def map(vector: (Int, Vector[Double])): (Int, Vector[Double], Double) = {
+    val repForcesAndSum = embedding.mapWithBcVariable(tree) {
+      (vector, tree) =>
         val index = vector._1
-        val leftVector = vector._2
-
-
-        val (repForce, sumQ) = tree.computeRepulsiveForce(leftVector, theta)
+        val embbedingVector = vector._2
+        val (repForce, sumQ) = tree.computeRepulsiveForce(embbedingVector, theta)
         (index, repForce, sumQ)
-      }
-    }).withForwardedFields("_1")
-      .withBroadcastSet(tree, "tree")
+    }.withForwardedFields("_1")
 
     val sumQ = repForcesAndSum.map(x => x._3).reduce((x, y) => x + y)
 
     // compute attracting forces
     val attrForces = highDimAffinities
-      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double])] {
+      .map(new RichMapFunction[(Int, SparseVector[Double]), (Int, Vector[Double])] {
       private var embedding: Map[Int, Vector[Double]] = null
       private val lossAccumulator = new MapAccumulator()
       private var currentIteration = 0
@@ -296,17 +281,15 @@ object TsneHelpers {
         getRuntimeContext.addAccumulator("loss", lossAccumulator)
       }
 
-      def map(pi: (Int, Vector[Double])): (Int, Vector[Double]) = {
+      def map(pi: (Int, SparseVector[Double])): (Int, Vector[Double]) = {
         val i = pi._1
-        val p = pi._2.asInstanceOf[SparseVector[Double]]
-
+        val p = pi._2
         var partialGradient = DenseVector.fill(dimension, 0.0)
-
         var offset = 0
+
         while(offset < p.activeSize) {
           val j = p.indexAt(offset)
           val pij = p.valueAt(offset)
-
           val qij = 1 / (1 + metric(embedding(i), embedding(j)))
 
           partialGradient += pij * qij * (embedding(i) - embedding(j))
@@ -315,7 +298,6 @@ object TsneHelpers {
             val partialLoss = pij * scala.math.log(pij / (qij / sumQ))
             lossAccumulator.add((currentIteration + iterOffset, partialLoss))
           }
-
           offset += 1
         }
 
@@ -326,23 +308,13 @@ object TsneHelpers {
       .withBroadcastSet(sumQ, "sumQ")
 
     // put everything together
-    attrForces.join(repForcesAndSum).where(0).equalTo(0)
-      .map(new RichMapFunction[((Int, Vector[Double]), (Int, Vector[Double], Double)),
-      (Int, Vector[Double])] {
-      private var sumQ: Double = 0.0
+    attrForces.join(repForcesAndSum).where(0).equalTo(0).mapWithBcVariable(sumQ) {
+      (vector, sumQ) =>
+        val attrForce = vector._1._2
+        val repForce = vector._2._2 / sumQ
 
-      override def open(parameters: Configuration) {
-        sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
-      }
-
-      def map(vectors: ((Int, Vector[Double]), (Int, Vector[Double], Double))):
-      (Int, Vector[Double]) = {
-        val attrForce = vectors._1._2
-        val repForce = vectors._2._2 / sumQ
-
-        (vectors._1._1, attrForce - repForce)
-      }
-    }).withForwardedFields("_1._1->_1").withBroadcastSet(sumQ, "sumQ")
+        (vector._1._1, attrForce - repForce)
+    }.withForwardedFields("_1._1->_1")
   }
 
   def centerEmbedding(embedding: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])]):
@@ -377,7 +349,6 @@ object TsneHelpers {
         val previousGradient = rest._3
         val gain = rest._4
         val currentGradient = dY._2
-
         val d = currentGradient.size
         val newEmbedding = new DenseVector[Double](d)
         val newGain = new DenseVector[Double](d)
@@ -399,7 +370,7 @@ object TsneHelpers {
   
   def iterationComputation (iterations: Int, momentum: Double,
                             workingSet:DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
-                            highdimAffinites: DataSet[(Int, Vector[Double])],
+                            highdimAffinites: DataSet[(Int, SparseVector[Double])],
                             metric: (Vector[Double], Vector[Double]) => Double,
                             learningRate: Double, theta: Double, dimension: Int,
                             iterOffset: Int) = {
@@ -422,7 +393,7 @@ object TsneHelpers {
     }
   }
 
-  def optimize(highDimAffinities: DataSet[(Int, Vector[Double])],
+  def optimize(highDimAffinities: DataSet[(Int, SparseVector[Double])],
                initialWorkingSet: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
                learningRate: Double, iterations: Int,
                metric: (Vector[Double], Vector[Double]) => Double,

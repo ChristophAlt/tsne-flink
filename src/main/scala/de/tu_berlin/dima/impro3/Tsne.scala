@@ -116,7 +116,7 @@ object Tsne {
     // compute joint probabilities pij
     val jntDistribution = jointDistribution(pwAffinities)
     // put everything into breeze SparseVectors
-    val svJntDistribution: DataSet[(Int, Vector[Double])] = jntDistribution.groupBy(0).reduceGroup {
+    val svJntDistribution: DataSet[(Int, SparseVector[Double])] = jntDistribution.groupBy(0).reduceGroup {
       entries =>
         val vectorBuilder = new VectorBuilder[Double](inputDimension * inputDimension)
         val first = entries.next()
