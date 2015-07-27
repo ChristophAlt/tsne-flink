@@ -27,11 +27,14 @@ import org.apache.flink.configuration.Configuration
 import org.apache.flink.ml._
 import org.apache.flink.ml.common.FlinkMLTools
 import org.apache.flink.util.Collector
+import org.apache.log4j._
 
 import scala.collection.JavaConverters._
 
 
 object TsneHelpers {
+
+  val LOG = Logger.getLogger(TsneHelpers.getClass.getName)
 
   //============================= TSNE steps ===============================================//
 
@@ -243,12 +246,15 @@ object TsneHelpers {
         val (minX, maxX, minY, maxY, sum, count) = boundaryAndMean
 
         val mean = sum / count.toDouble
+        LOG.info("Start building QuadTree")
         val tree = QuadTree(None, Cell(mean(0), mean(1), scala.math.max(maxX - minX, maxY - minY)))
 
         for (v <- embedding.asScala) {
           tree.insert(v._2)
         }
+        LOG.info("Finished building QuadTree")
         out.collect(tree)
+        LOG.info("Tree collected")
       }
     }).withBroadcastSet(boundaryAndMean, "boundaryAndMean")
 
