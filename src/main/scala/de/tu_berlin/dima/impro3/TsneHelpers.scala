@@ -35,7 +35,8 @@ object TsneHelpers {
 
   //============================= TSNE steps ===============================================//
 
-  def kNearestNeighbors(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double):
+  def kNearestNeighbors(input: DataSet[(Int, Vector[Double])], k: Int,
+                        metric: (Vector[Double], Vector[Double]) => Double):
   DataSet[(Int, Int, Double)] = {
     // compute k nearest neighbors for all points
     input
@@ -45,16 +46,17 @@ object TsneHelpers {
         (v1._1, v2._1, metric(v1._2, v2._2))
     }.withForwardedFieldsFirst("_1->_1").withForwardedFieldsSecond("_1->_2")
       // remove distances == 0
-      .filter(x => x._1 != x._2).withForwardedFields("_1")
+      .filter(x => x._1 != x._2)
       // group by i
       .groupBy(_._1)
       // sort
       .sortGroup(_._3, Order.ASCENDING)
       // either take the n nearest neighbors or take the 3u nearest neighbors by default
-      .first(k).withForwardedFields("_1")
+      .first(k)
   }
 
-  def partitionKnn(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double, blocks: Int):
+  def partitionKnn(input: DataSet[(Int, Vector[Double])], k: Int,
+                   metric: (Vector[Double], Vector[Double]) => Double, blocks: Int):
   DataSet[(Int, Int, Double)] = {
 
     val partitioner = FlinkMLTools.ModuloKeyPartitioner
@@ -85,7 +87,8 @@ object TsneHelpers {
     result
   }
 
-  def projectKnn(input: DataSet[(Int, Vector[Double])], k: Int, metric: (Vector[Double], Vector[Double]) => Double, dimension: Int,
+  def projectKnn(input: DataSet[(Int, Vector[Double])], k: Int,
+                 metric: (Vector[Double], Vector[Double]) => Double, dimension: Int,
                  iterations: Int): DataSet[(Int, Int, Double)] = {
 
     val randomVectors: Seq[DenseVector[Double]] = for (_ <- 1 until iterations) yield {
@@ -99,7 +102,8 @@ object TsneHelpers {
     var initialNeighbors = findPossibleNeighbors(nnInput, k, metric)
 
     val otherNeighbors = for (randomVector <- randomVectors) yield {
-      val projectedVectors = nnInput.map(x => (x._1, x._2 + randomVector, x._2)).withForwardedFields("_1", "_2->_3")
+      val projectedVectors =
+        nnInput.map(x => (x._1, x._2 + randomVector, x._2)).withForwardedFields("_1", "_2->_3")
       findPossibleNeighbors(projectedVectors, k, metric)
     }
 
@@ -127,7 +131,8 @@ object TsneHelpers {
   }
 
   private def findPossibleNeighbors(input: DataSet[(Int, Vector[Double], Vector[Double])], k: Int,
-                            metric: (Vector[Double], Vector[Double]) => Double): DataSet[(Int, Int, Vector[Double], Vector[Double])] = {
+                            metric: (Vector[Double], Vector[Double]) => Double):
+  DataSet[(Int, Int, Vector[Double], Vector[Double])] = {
 
     input.reduceGroup {
       (iter, out: Collector[(Int, Int, Vector[Double], Vector[Double])]) => {
@@ -191,7 +196,8 @@ object TsneHelpers {
   DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
     // init Y (embedding) by sampling from N(0, I)
     input
-      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double], Vector[Double], Vector[Double])] {
+      .map(new RichMapFunction[(Int, Vector[Double]), (Int, Vector[Double], Vector[Double],
+      Vector[Double])] {
       private var gaussian: Rand[Double] = null
 
       override def open(parameters: Configuration) {
@@ -209,13 +215,17 @@ object TsneHelpers {
     }).withForwardedFields("_1")
   }
 
-  def gradient(highDimAffinities: DataSet[(Int, Vector[Double])], embedding: DataSet[(Int, Vector[Double])],
-               metric: (Vector[Double], Vector[Double]) => Double, theta: Double, dimension:Int, iterOffset: Int=0):
+  def gradient(highDimAffinities: DataSet[(Int, Vector[Double])],
+               embedding: DataSet[(Int, Vector[Double])],
+               metric: (Vector[Double], Vector[Double]) => Double,
+               theta: Double, dimension:Int, iterOffset: Int=0):
     DataSet[(Int, Vector[Double])] = {
 
     // find xMin, xMax, yMin and yMax, as well as sum and count
-    val boundaryAndMean = embedding.map(x => (x._2(0), x._2(0), x._2(1), x._2(1), DenseVector.fill(2, 0.0), 1))
-      .reduce((x, y) => (scala.math.min(x._1, y._1), scala.math.max(x._2, y._2), scala.math.min(x._3, y._3), scala.math.max(x._4, y._4), x._5 + y._5, x._6 + y._6))
+    val boundaryAndMean = embedding.map(x => (x._2(0), x._2(0), x._2(1), x._2(1),
+      DenseVector.fill(2, 0.0), 1))
+      .reduce((x, y) => (scala.math.min(x._1, y._1), scala.math.max(x._2, y._2),
+      scala.math.min(x._3, y._3), scala.math.max(x._4, y._4), x._5 + y._5, x._6 + y._6))
 
     // compute repulsive forces
     val tree = embedding
@@ -224,7 +234,8 @@ object TsneHelpers {
 
       override def open(parameters: Configuration) {
         boundaryAndMean = getRuntimeContext
-          .getBroadcastVariable[(Double, Double, Double, Double, Vector[Double], Int)]("boundaryAndMean").get(0)
+          .getBroadcastVariable[
+          (Double, Double, Double, Double, Vector[Double], Int)]("boundaryAndMean").get(0)
       }
 
       def reduce(embedding: java.lang.Iterable[(Int, Vector[Double])],
@@ -307,18 +318,19 @@ object TsneHelpers {
     }).withForwardedFields("_1")
       .withBroadcastSet(embedding, "embedding")
       .withBroadcastSet(sumQ, "sumQ")
-      //.groupBy(_._1).reduce((v1, v2) => (v1._1, v1._2 + v2._2))
 
     // put everything together
     attrForces.join(repForcesAndSum).where(0).equalTo(0)
-      .map(new RichMapFunction[((Int, Vector[Double]), (Int, Vector[Double], Double)), (Int, Vector[Double])] {
+      .map(new RichMapFunction[((Int, Vector[Double]), (Int, Vector[Double], Double)),
+      (Int, Vector[Double])] {
       private var sumQ: Double = 0.0
 
       override def open(parameters: Configuration) {
         sumQ = getRuntimeContext.getBroadcastVariable[Double]("sumQ").get(0)
       }
 
-      def map(vectors: ((Int, Vector[Double]), (Int, Vector[Double], Double))): (Int, Vector[Double]) = {
+      def map(vectors: ((Int, Vector[Double]), (Int, Vector[Double], Double))):
+      (Int, Vector[Double]) = {
         val attrForce = vectors._1._2
         val repForce = vectors._2._2 / sumQ
 
@@ -330,7 +342,8 @@ object TsneHelpers {
   def centerEmbedding(embedding: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])]):
   DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])] = {
     // center embedding
-    val sumAndCount = embedding.map(x => (x._2, 1)).withForwardedFields("_2->_1").reduce((x, y) => (x._1 + y._1, x._2 + y._2))
+    val sumAndCount = embedding.map(x => (x._2, 1)).withForwardedFields("_2->_1")
+      .reduce((x, y) => (x._1 + y._1, x._2 + y._2))
 
     embedding.mapWithBcVariable(sumAndCount) {
       (v, sumAndCount) => (v._1, v._2 - (sumAndCount._1 :/ sumAndCount._2.toDouble), v._3, v._4)
@@ -370,7 +383,8 @@ object TsneHelpers {
           } else {
             newGain(i) = scala.math.max(gain(i) + 0.2, minGain)
           }
-          newGradient(i) = momentum * previousGradient(i) - learningRate * newGain(i) * currentGradient(i)
+          newGradient(i) =
+            momentum * previousGradient(i) - learningRate * newGain(i) * currentGradient(i)
           newEmbedding(i) = newGradient(i) + currentEmbedding(i)
         }
         (dY._1, newEmbedding, newGradient, newGain)
@@ -379,8 +393,10 @@ object TsneHelpers {
   
   def iterationComputation (iterations: Int, momentum: Double,
                             workingSet:DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
-                            highdimAffinites: DataSet[(Int, Vector[Double])], metric: (Vector[Double], Vector[Double]) => Double,
-                            learningRate: Double, theta: Double, dimension: Int, iterOffset: Int) = {
+                            highdimAffinites: DataSet[(Int, Vector[Double])],
+                            metric: (Vector[Double], Vector[Double]) => Double,
+                            learningRate: Double, theta: Double, dimension: Int,
+                            iterOffset: Int) = {
 
     workingSet.iterate(iterations) {
       // (index, embedding, gradient, gains)
@@ -402,9 +418,10 @@ object TsneHelpers {
 
   def optimize(highDimAffinities: DataSet[(Int, Vector[Double])],
                initialWorkingSet: DataSet[(Int, Vector[Double], Vector[Double], Vector[Double])],
-               learningRate: Double, iterations: Int, metric: (Vector[Double], Vector[Double]) => Double,
-               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double, theta: Double, dimension: Int):
-  DataSet[(Int, Vector[Double])] = {
+               learningRate: Double, iterations: Int,
+               metric: (Vector[Double], Vector[Double]) => Double,
+               earlyExaggeration: Double, initialMomentum: Double, finalMomentum: Double,
+               theta: Double, dimension: Int): DataSet[(Int, Vector[Double])] = {
 
     val iterInitMomentumExaggeration = scala.math.min(iterations, 20)
     val iterExaggeration = scala.math.min(iterations - iterInitMomentumExaggeration, 101-20)
@@ -421,14 +438,15 @@ object TsneHelpers {
 
     if (iterExaggeration > 0) {
       // iterate with final momentum and exaggerated input
-      embedding = iterationComputation(iterExaggeration, finalMomentum, embedding, exaggeratedAffinities,
-        metric, learningRate, theta, dimension, iterInitMomentumExaggeration)
+      embedding = iterationComputation(iterExaggeration, finalMomentum, embedding,
+        exaggeratedAffinities, metric, learningRate, theta, dimension, iterInitMomentumExaggeration)
     }
 
     // iterate with final momentum and standard input
     if (iterWoExaggeration > 0) {
-      embedding = iterationComputation(iterWoExaggeration, finalMomentum, embedding, highDimAffinities,
-        metric, learningRate, theta, dimension, iterExaggeration + iterInitMomentumExaggeration)
+      embedding = iterationComputation(iterWoExaggeration, finalMomentum, embedding,
+        highDimAffinities, metric, learningRate, theta, dimension,
+        iterExaggeration + iterInitMomentumExaggeration)
     }
 
     embedding.map(x => (x._1, x._2))
@@ -441,7 +459,8 @@ object TsneHelpers {
     // try to approximate beta_i (1/sigma_i**2) so we can compute p_j|i
     // set target to log(perplexity) (entropy) to make computation simpler
     approximateBeta(1.0,
-      distances, scala.math.log(perplexity), Double.NegativeInfinity, Double.NegativeInfinity, Double.PositiveInfinity)
+      distances, scala.math.log(perplexity), Double.NegativeInfinity, Double.NegativeInfinity,
+      Double.PositiveInfinity)
   }
 
   private def approximateBeta(beta: Double, distances: Seq[(Int, Int, Double)], targetH: Double,

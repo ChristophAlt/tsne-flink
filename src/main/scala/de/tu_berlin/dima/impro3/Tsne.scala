@@ -34,9 +34,10 @@ object Tsne {
     val parameters = ParameterTool.fromArgs(args)
     val env = ExecutionEnvironment.getExecutionEnvironment
 
+    // ========================== Parameters ======================================================
+
     val getExecutionPlan = parameters.has("executionPlan")
 
-    // get parameters from command line or use default
     val inputPath = parameters.getRequired("input")
     val outputPath = parameters.getRequired("output")
 
@@ -54,23 +55,27 @@ object Tsne {
 
     val initialMomentum = parameters.getDouble("initialMomentum", 0.5)
     val finalMomentum = parameters.getDouble("finalMomentum", 0.8)
-    val theta = parameters.getDouble("theta", 0.5)
+    val theta = parameters.getDouble("theta", 0.25)
     val lossFile = parameters.get("loss", "loss.txt")
     val knnIterations = parameters.getLong("knnIterations", 3)
     val knnMethod = parameters.getRequired("knnMethod")
     val knnBlocks = parameters.getLong("knnBlocks", env.getParallelism)
 
+    // ===========================================================================================
+
     val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
 
-    val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension, nComponents, learningRate, iterations,
-      randomState, neighbors, earlyExaggeration, initialMomentum, finalMomentum, theta, knnMethod, knnIterations, knnBlocks)
+    val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension,
+      nComponents, learningRate, iterations, randomState, neighbors, earlyExaggeration,
+      initialMomentum, finalMomentum, theta, knnMethod, knnIterations, knnBlocks)
 
     result.map(x=> (x._1, x._2(0), x._2(1))).writeAsCsv(outputPath, writeMode=WriteMode.OVERWRITE)
 
+    // either output the execution plan as json or execute the dataflow
     if (getExecutionPlan) {
       val executionPlan = env.getExecutionPlan()
 
-      val pw = new PrintWriter(new File("executionPlan.json"))
+      val pw = new PrintWriter(new File("tsne_executionPlan.json"))
       pw.write(executionPlan)
       pw.close
 
@@ -83,37 +88,13 @@ object Tsne {
     }
   }
 
-  def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
-                        fields: Array[Int]): DataSet[(Int, Vector[Double])] = {
-
-    env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
-    .groupBy(_._1).reduceGroup {
-      vectorEntries =>
-          val vectorBuilder = new VectorBuilder[Double](dimension)
-          val first = vectorEntries.next()
-          vectorBuilder.add(first._2, first._3)
-            while (vectorEntries.hasNext) {
-              val vectorEntry = vectorEntries.next()
-              vectorBuilder.add(vectorEntry._2, vectorEntry._3)
-            }
-          (first._1, vectorBuilder.toDenseVector)
-        }
-  }
-
-  def getMetric(metric: String): (Vector[Double], Vector[Double]) => Double = {
-    metric match {
-      case "sqeucledian" => squaredDistance.apply[Vector[Double], Vector[Double], Double]
-      case "eucledian" => euclideanDistance.apply[Vector[Double], Vector[Double], Double]
-      case "cosine" => cosineDistance.apply[Vector[Double], Vector[Double], Double]
-      case _ => throw new IllegalArgumentException(s"Metric '$metric' not defined")
-    }
-  }
-
-  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[(Int, Vector[Double])], metric: (Vector[Double], Vector[Double]) => Double,
-                               perplexity: Double, inputDimension: Int, nComponents: Int, learningRate: Double,
-                               iterations: Int, randomState: Int, neighbors: Int,
-                               earlyExaggeration: Double, initialMomentum: Double,
-                               finalMomentum: Double, theta: Double, knnMethod: String, knnIterations: Int, knnBlocks: Int):
+  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[(Int, Vector[Double])],
+                               metric: (Vector[Double], Vector[Double]) => Double,
+                               perplexity: Double, inputDimension: Int, nComponents: Int,
+                               learningRate: Double, iterations: Int, randomState: Int,
+                               neighbors: Int, earlyExaggeration: Double, initialMomentum: Double,
+                               finalMomentum: Double, theta: Double, knnMethod: String,
+                               knnIterations: Int, knnBlocks: Int):
   DataSet[(Int, Vector[Double])] = {
 
     //val centeredInput = centerInput(input)
@@ -127,12 +108,13 @@ object Tsne {
       case _ => throw new IllegalArgumentException(s"Knn method '$metric' not defined")
     }
 
+    // compute high dimensional affinities p_j|i
     val pwAffinities = pairwiseAffinities(knn, perplexity)
-
+    // compute joint probabilities pij
     val jntDistribution = jointDistribution(pwAffinities)
-
+    // init Y
     val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
-
+    // put everything into breeze SparseVectors
     val svJntDistribution: DataSet[(Int, Vector[Double])] = jntDistribution.groupBy(0).reduceGroup {
       entries =>
         val vectorBuilder = new VectorBuilder[Double](inputDimension * inputDimension)
@@ -144,8 +126,34 @@ object Tsne {
         }
         (first._1, vectorBuilder.toSparseVector)
     }
+    // optimize via gradient descent
+    optimize(svJntDistribution, initialWorkingSet, learningRate, iterations, metric,
+      earlyExaggeration, initialMomentum, finalMomentum, theta, nComponents)
+  }
 
-    optimize(svJntDistribution, initialWorkingSet, learningRate, iterations, metric, earlyExaggeration,
-      initialMomentum, finalMomentum, theta, nComponents)
+  def readInput(inputPath: String, dimension: Int, env: ExecutionEnvironment,
+                fields: Array[Int]): DataSet[(Int, Vector[Double])] = {
+
+    env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
+      .groupBy(_._1).reduceGroup {
+      vectorEntries =>
+        val vectorBuilder = new VectorBuilder[Double](dimension)
+        val first = vectorEntries.next()
+        vectorBuilder.add(first._2, first._3)
+        while (vectorEntries.hasNext) {
+          val vectorEntry = vectorEntries.next()
+          vectorBuilder.add(vectorEntry._2, vectorEntry._3)
+        }
+        (first._1, vectorBuilder.toDenseVector)
+    }
+  }
+
+  def getMetric(metric: String): (Vector[Double], Vector[Double]) => Double = {
+    metric match {
+      case "sqeucledian" => squaredDistance.apply[Vector[Double], Vector[Double], Double]
+      case "eucledian" => euclideanDistance.apply[Vector[Double], Vector[Double], Double]
+      case "cosine" => cosineDistance.apply[Vector[Double], Vector[Double], Double]
+      case _ => throw new IllegalArgumentException(s"Metric '$metric' not defined")
+    }
   }
 }
