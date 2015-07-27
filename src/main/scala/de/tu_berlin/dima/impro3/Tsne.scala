@@ -43,7 +43,7 @@ object Tsne {
 
     val inputDimension = parameters.getRequired("dimension").toInt
 
-    val metric = parameters.get("metric", "sqeucledian")
+    val metric = parameters.get("metric", "sqeuclidean")
     val perplexity = parameters.getDouble("perplexity", 30.0)
     val nComponents = parameters.getLong("nComponents", 2)
     val earlyExaggeration = parameters.getLong("earlyExaggeration", 4)
@@ -150,8 +150,8 @@ object Tsne {
 
   def getMetric(metric: String): (Vector[Double], Vector[Double]) => Double = {
     metric match {
-      case "sqeucledian" => squaredDistance.apply[Vector[Double], Vector[Double], Double]
-      case "eucledian" => euclideanDistance.apply[Vector[Double], Vector[Double], Double]
+      case "sqeuclidean" => squaredDistance.apply[Vector[Double], Vector[Double], Double]
+      case "euclidean" => euclideanDistance.apply[Vector[Double], Vector[Double], Double]
       case "cosine" => cosineDistance.apply[Vector[Double], Vector[Double], Double]
       case _ => throw new IllegalArgumentException(s"Metric '$metric' not defined")
     }
