@@ -22,15 +22,15 @@ When running the dataflow with Apache Flink, the following commandline parameter
 `--executionPlan` stores the dataflow execution plan in "tsne_executionPlan.json"  
 `--metric` the metric used for calculating the similarity between datapoints (can be "sqeuclidean", "euclidean" or "cosine")  
 `--perplexity` the perplexity used for determining the variance (via binary search) of the high dimensional affinities  
-`--nComponents` the dimensionality of the embedding
-`--earlyExaggeration` a constant the affinities are multiplied with intially to separate clusters
-`--learningRate` the initial gradient step size
-`--iterations` the number of gradient iterations
-`--randomState` the seed for the PRNG used to initialize the embedding
-`--neighbors` the number of neighbors used to approximate the high dimensional affinities
-`--initialMomentum` the momentum used during the initial gradient steps (iteration < 20)
-`--finalMomentum` the momentum used during the final gradient steps (iteration > 20
-`--theta` the threshold used for approximating the repulsive forces during gradient computation (lower values give better accuracy but also less performance)    
-`--lossFile` path to the file where the loss per iteration is stored
-`--knnIterations` only used when knnMethod == "project", specifies the number of projection steps
-`--knnBlocks` only used when knnMethod == "partition", specifies the number of partitions
+`--nComponents` the dimensionality of the embedding  
+`--earlyExaggeration` a constant the affinities are multiplied with intially to separate clusters  
+`--learningRate` the initial gradient step size  
+`--iterations` the number of gradient iterations  
+`--randomState` the seed for the PRNG used to initialize the embedding  
+`--neighbors` the number of neighbors used to approximate the high dimensional affinities  
+`--initialMomentum` the momentum used during the initial gradient steps (iteration < 20)  
+`--finalMomentum` the momentum used during the final gradient steps (iteration > 20  
+`--theta` the threshold used for approximating the repulsive forces during gradient computation (lower values give better accuracy but also less performance)  
+`--lossFile` path to the file where the loss per iteration is stored  
+`--knnIterations` only used when knnMethod == "project", specifies the number of projection steps  
+`--knnBlocks` only used when knnMethod == "partition", specifies the number of partitions  
