@@ -37,6 +37,7 @@ object Tsne {
     // ========================== Parameters ======================================================
 
     val getExecutionPlan = parameters.has("executionPlan")
+    val inputDistanceMatrix = parameters.has("inputDistanceMatrix")
 
     val inputPath = parameters.getRequired("input")
     val outputPath = parameters.getRequired("output")
@@ -63,9 +64,22 @@ object Tsne {
 
     // ===========================================================================================
 
-    val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
+    var knn: DataSet[(Int, Int, Double)] = null
 
-    val result = computeEmbedding(env, input, getMetric(metric), perplexity, inputDimension,
+    if (inputDistanceMatrix) {
+      knn = readDistanceMatrix(inputPath, env, Array(0,1,2))
+    } else {
+      val input = readInput(inputPath, inputDimension, env, Array(0,1,2))
+      val knnMetric = getMetric(metric)
+      knn = knnMethod match {
+        case "bruteforce" => kNearestNeighbors(input, neighbors, knnMetric)
+        case "partition" => partitionKnn(input, neighbors, knnMetric, knnBlocks)
+        case "project" => projectKnn(input, neighbors, knnMetric, inputDimension, knnIterations)
+        case _ => throw new IllegalArgumentException(s"Knn method '$metric' not defined")
+      }
+    }
+
+    val result = computeEmbedding(env, knn, getMetric(metric), perplexity, inputDimension,
       nComponents, learningRate, iterations, randomState, neighbors, earlyExaggeration,
       initialMomentum, finalMomentum, theta, knnMethod, knnIterations, knnBlocks)
 
@@ -88,7 +102,7 @@ object Tsne {
     }
   }
 
-  private def computeEmbedding(env: ExecutionEnvironment, input: DataSet[(Int, Vector[Double])],
+  private def computeEmbedding(env: ExecutionEnvironment, knn: DataSet[(Int, Int, Double)],
                                metric: (Vector[Double], Vector[Double]) => Double,
                                perplexity: Double, inputDimension: Int, nComponents: Int,
                                learningRate: Double, iterations: Int, randomState: Int,
@@ -97,25 +111,12 @@ object Tsne {
                                knnIterations: Int, knnBlocks: Int):
   DataSet[(Int, Vector[Double])] = {
 
-    //val centeredInput = centerInput(input)
-    //val knn = kNearestNeighbors(centeredInput, neighbors, metric)
-    //val initialWorkingSet = initWorkingSet(centeredInput, nComponents, randomState)
-
-    val knn = knnMethod match {
-      case "bruteforce" => kNearestNeighbors(input, neighbors, metric)
-      case "partition" => partitionKnn(input, neighbors, metric, knnBlocks)
-      case "project" => projectKnn(input, neighbors, metric, inputDimension, knnIterations)
-      case _ => throw new IllegalArgumentException(s"Knn method '$metric' not defined")
-    }
-
     // compute high dimensional affinities p_j|i
     val pwAffinities = pairwiseAffinities(knn, perplexity)
     // compute joint probabilities pij
     val jntDistribution = jointDistribution(pwAffinities)
-    // init Y
-    val initialWorkingSet = initWorkingSet(input, nComponents, randomState)
     // put everything into breeze SparseVectors
-    val svJntDistribution: DataSet[(Int, Vector[Double])] = jntDistribution.groupBy(0).reduceGroup {
+    val svJntDistribution: DataSet[(Int, SparseVector[Double])] = jntDistribution.groupBy(0).reduceGroup {
       entries =>
         val vectorBuilder = new VectorBuilder[Double](inputDimension * inputDimension)
         val first = entries.next()
@@ -126,6 +127,9 @@ object Tsne {
         }
         (first._1, vectorBuilder.toSparseVector)
     }
+
+    // init Y
+    val initialWorkingSet = initWorkingSet(svJntDistribution, nComponents, randomState)
     // optimize via gradient descent
     optimize(svJntDistribution, initialWorkingSet, learningRate, iterations, metric,
       earlyExaggeration, initialMomentum, finalMomentum, theta, nComponents)
@@ -146,6 +150,12 @@ object Tsne {
         }
         (first._1, vectorBuilder.toDenseVector)
     }
+  }
+
+  def readDistanceMatrix(inputPath: String, env: ExecutionEnvironment,
+                fields: Array[Int]): DataSet[(Int, Int, Double)] = {
+
+    env.readCsvFile[(Int, Int, Double)](inputPath, includedFields = fields)
   }
 
   def getMetric(metric: String): (Vector[Double], Vector[Double]) => Double = {

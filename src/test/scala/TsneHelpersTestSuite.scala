@@ -30,7 +30,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val neighbors = 2
-    val metric = Tsne.getMetric("sqeucledian")
+    val metric = Tsne.getMetric("sqeuclidean")
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
 
@@ -45,7 +45,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
     val neighbors = 2
-    val metric = Tsne.getMetric("sqeucledian")
+    val metric = Tsne.getMetric("sqeuclidean")
 
     val input = env.fromCollection(TsneHelpersTestSuite.knnInput)
 
@@ -78,7 +78,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val perplexity = 2.0
     val neighbors = 10
-    val metric = Tsne.getMetric("sqeucledian")
+    val metric = Tsne.getMetric("sqeuclidean")
 
     val input = Tsne
       .readInput(getClass.getResource("/dense_input.csv").getPath, 28*28, env, Array(0,1,2))
@@ -188,7 +188,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
 
     val grad = embedding.iterate(1) {
       currentEmbedding =>
-        gradient(svJntDistribution, currentEmbedding, Tsne.getMetric("sqeucledian"), theta, 2)
+        gradient(svJntDistribution, currentEmbedding, Tsne.getMetric("sqeuclidean"), theta, 2)
     }
 
     val results = grad.collect()
@@ -277,7 +277,7 @@ class TsneHelpersTestSuite extends FlatSpec with Matchers with Inspectors {
     val learningRate = 300
     val nComponents = 2
     val iterations = 1
-    val metric = Tsne.getMetric("sqeucledian")
+    val metric = Tsne.getMetric("sqeuclidean")
     // the result of setting theta to zero is the same as not using a quad-tree at all
     val theta = 0.0
 
