@@ -16,6 +16,8 @@ When running the dataflow with Apache Flink, the following commandline parameter
 `--output` path where the final embedding is written to  
 `--dimension` the dimensionality of the input datapoints  
 `--knnMethod` which knn method to use (can be "bruteforce", "partition" or "project")  
+`--inputDistanceMatrix` signals that the input is a precomputed distance matrix, which is then used for computing the high dimensional affinities  
+
 
 ### Optional
 
